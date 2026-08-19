@@ -63,6 +63,13 @@ class VisitRecord extends Model
 
     // Session numbers are always server-computed, never client input — same
     // spirit as PatientFolder::generateCardNumber() / Invoice::generateInvoiceNumber().
+    //
+    // This is the one piece of genuinely dialysis-specific *behavior* (not
+    // just fields) on this model. A future recurring-treatment type with
+    // its own computed/auto-numbering logic gets its own equivalent static
+    // method here (e.g. nextChemoSessionNumber()), not a generic
+    // nextSessionNumber($type) — mirrors the per-type-columns decision in
+    // the dialysis migration rather than reaching for something shared.
     public static function nextDialysisSessionNumber(int $patientFileId): int
     {
         return self::where('patient_file_id', $patientFileId)

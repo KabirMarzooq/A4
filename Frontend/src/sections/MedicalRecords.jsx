@@ -415,7 +415,14 @@ function PatientFileView({ fileId, onBack }) {
   const records = file?.visit_records || [];
   // Dialysis sessions get their own register-style tab instead of the
   // narrative timeline — kept separate here so both views stay in sync
-  // with a single fetch.
+  // with a single fetch. A future recurring-treatment type (chemo, physio,
+  // ANC visits, etc.) would get its own sibling tab + form pair the same
+  // way — DialysisTab/DialysisSessionForm below are deliberately their own
+  // components, not a generic type-parameterized table/form, since the
+  // register a hospital actually wants tends to differ enough per
+  // treatment (different columns, different vocabulary) that forcing one
+  // shared component fights the UI more than it saves. Don't build that
+  // until a second type is actually requested.
   const generalRecords = records.filter((r) => r.visit_type !== "dialysis");
   const dialysisRecords = records.filter((r) => r.visit_type === "dialysis");
 

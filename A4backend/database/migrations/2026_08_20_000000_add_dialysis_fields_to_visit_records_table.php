@@ -11,6 +11,21 @@ use Illuminate\Support\Facades\Schema;
 // pipeline instead of duplicating it. session_number is always computed
 // server-side (see VisitRecord::nextDialysisSessionNumber) and is never a
 // client-editable input, same spirit as card_number/invoice_number.
+//
+// Deliberately dialysis-specific typed columns, not a generic
+// treatment_type free-text field or a JSON "extra data" blob — an earlier
+// design proposed the generic version, but structured typed columns are a
+// real clinical upgrade over free text (queryable, validated, matches what
+// a nurse/doctor actually fills in per session) and were chosen instead.
+// If another recurring treatment type (chemo, physio, ANC visits, etc.) is
+// ever actually requested, repeat this exact shape rather than reaching
+// for something generic: a new visit_type enum value via a raw
+// `ALTER TABLE ... MODIFY COLUMN` migration (same pattern as
+// 2026_08_21_000000_add_lab_role_to_users_table.php did for users.role),
+// plus a handful of new typed nullable columns for that type's own real
+// fields. Don't build this ahead of an actual request — see VisitRecord.php
+// and MedicalRecords.jsx for the other two places this same per-type
+// pattern continues (session-number-style logic, and the tab/form UI).
 return new class extends Migration
 {
     public function up(): void
