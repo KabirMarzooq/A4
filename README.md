@@ -1,13 +1,10 @@
-# 🏥 A4 Medical Consortium Hospital Management System
+# 🏥 A4 Medical Consortium — Hospital Management System
 
 <div align="center">
 
+**A full-stack Hospital Management System built with Laravel & React, designed to run both in the cloud and on a hospital's own local server.**
 
-**A full-stack, production-ready Hospital Management System built with Laravel & React**
-
---> LIVE • [A4 Medical Consortium](https://hms-limr.vercel.app)
-
-[Features](#-features) • [Tech Stack](#-tech-stack) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [Demo](#-demo-accounts) • [Contributing](#-contributing)
+[Features](#-features) • [Architecture](#-architecture) • [Getting Started](#-getting-started) • [Project Structure](#-project-structure) • [Core Systems](#-core-systems) • [API Reference](#-api-reference) • [Roles & Permissions](#-roles--permissions)
 
 </div>
 
@@ -16,1134 +13,394 @@
 ## 📋 Table of Contents
 
 - [Overview](#-overview)
+- [Architecture](#-architecture)
 - [Features](#-features)
 - [Tech Stack](#-tech-stack)
-- [System Architecture](#-system-architecture)
-- [Quick Start](#-quick-start)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Database Setup](#database-setup)
-  - [Running the Application](#running-the-application)
+- [Getting Started](#-getting-started)
 - [Project Structure](#-project-structure)
-- [Core Modules](#-core-modules)
-- [API Documentation](#-api-documentation)
-- [User Roles & Permissions](#-user-roles--permissions)
-- [Security Features](#-security-features)
-- [Payment Integration](#-payment-integration)
-- [Demo Accounts](#-demo-accounts)
-- [Screenshots](#-screenshots)
+- [Core Systems](#-core-systems)
+- [API Reference](#-api-reference)
+- [Roles & Permissions](#-roles--permissions)
+- [Security](#-security)
+- [Payments](#-payments)
 - [Contributing](#-contributing)
 - [License](#-license)
 - [Support](#-support)
+- [Roadmap](#-roadmap)
 
 ---
 
 ## 🌟 Overview
 
-**A4 Medical Consortium** is a comprehensive, enterprise-grade Hospital Management System designed to streamline healthcare operations. Built with modern web technologies, it provides a seamless experience for patients, doctors, administrators, receptionists, and pharmacy staff.
+A4 Medical Consortium is a hospital management system covering the full day-to-day operation of a small-to-mid-size hospital: online appointment booking, walk-in patient registration, clinical documentation (visit records, dialysis sessions, inpatient admissions), lab orders and results, a pharmacy counter and drug inventory, billing, and a full audit trail — all behind role-based access for six distinct staff roles plus patients.
 
-### 🎯 Problem Statement
+Its defining architectural fact: **it's designed to run in two places at once.** A cloud deployment (Vercel + Railway) is where patients register accounts and book appointments online. A separate deployment on a physical server inside the hospital is what staff actually use day to day, working whether or not the hospital's internet is up. The two stay loosely connected by a small one-way sync bridge — see [Architecture](#-architecture).
 
-Traditional hospital management systems are often fragmented, difficult to use, and lack real-time synchronization between departments. A4 Medical Consortium solves this by providing:
+---
 
-- **Unified Platform**: Single system for all hospital operations
-- **Real-time Updates**: Instant synchronization across all modules
-- **Role-based Access**: Secure, department-specific interfaces
-- **Automated Billing**: Integrated payment processing with Paystack
-- **Smart Workflows**: Automated appointment reminders and prescription management
+## 🏗 Architecture
 
-### 🚀 Why A4 Medical Consortium?
+### The two deployments
 
-- ✅ **Production-Ready**: Battle-tested with real-world hospital workflows
-- ✅ **Scalable**: Designed to handle thousands of daily transactions
-- ✅ **Secure**: JWT authentication with refresh tokens, CORS protection, and SQL injection prevention
-- ✅ **Modern UI/UX**: Beautiful, intuitive interfaces built with React and TailwindCSS
-- ✅ **API-First**: RESTful backend perfect for mobile app integration
-- ✅ **Open Source**: MIT licensed - free to use and modify
+```
+                    ┌───────────────────────────────┐
+                    │           CLOUD                │
+                    │   (Vercel + Railway)            │
+                    │                                 │
+                    │  React frontend  ──►  Laravel API│
+                    │  (public site,        + MySQL    │
+                    │   patient portal)                │
+                    └───────────────┬─────────────────┘
+                                    │
+                          Offline sync bridge
+                    (shared-secret HTTP, one-way each direction,
+                     runs every 5 min via Laravel's scheduler)
+                                    │
+                    ┌───────────────▼─────────────────┐
+                    │           LOCAL                  │
+                    │  (hospital's own Windows server) │
+                    │                                   │
+                    │  React frontend  ──►  Laravel API │
+                    │  (staff-only,          + MySQL     │
+                    │   separate build)                  │
+                    └───────────────────────────────────┘
+```
+
+Both sides run the **same codebase** — one repo, deployed twice with different environment variables. What differs is which frontend build gets served (see [Getting Started](#-getting-started)) and which env vars are set (`SYNC_CLOUD_URL` only exists on the local side; the cloud side never calls itself).
+
+### What actually syncs
+
+- **Cloud → Local**: a new online appointment booking gets pulled down into a local `synced_booking_requests` queue (`php artisan sync:pull`), where it shows up on the Receptionist/Admin "Sync Requests" tab.
+- **Local → Cloud**: when a receptionist confirms or declines one of those requests, that decision gets pushed back up (`php artisan sync:push`) so the online patient's own appointment status actually reflects reality.
+- **Fails safely**: if the local machine has no internet when the sync job runs, both commands just log an error and try again on the next 5-minute cycle — nothing in normal local operation waits on or breaks because of this.
+- Confirming a request does **not** auto-create a patient record — the receptionist reviews the online-submitted details and creates the folder manually (same "New Folder" flow as any walk-in), so a typo or an existing family folder can be caught before it becomes permanent data.
+
+See `App\Http\Controllers\SyncController` (cloud side), `App\Http\Controllers\SyncedBookingRequestController` (local side), and `app/Console/Commands/Sync*.php` for the implementation.
+
+### Clinical data model
+
+Two separate patient concepts exist on purpose, because a walk-in patient never necessarily has an online account:
+
+- **`PatientFolder` / `PatientFile`** — the actual medical record system. A folder is a family/household (shared phone number, address); each file inside it is one individual, with demographics, allergies, next-of-kin, etc. No account is required for a patient file to exist — this is what a receptionist creates for a walk-in, and it's also what the offline sync flow produces once a receptionist confirms an online booking.
+- **`User` (role: `patient`) / `Appointment`** — the online-facing side. A registered patient books an appointment against a doctor; that's the thing that flows through the offline sync bridge.
+
+Every clinical encounter — a general visit, a dialysis session, a round-note during an inpatient stay, a lab order — is a row in (or linked from) `VisitRecord`, attached to a `PatientFile`. See [Core Systems](#-core-systems) for how dialysis, admissions, and lab orders extend this same pipeline rather than duplicating it.
 
 ---
 
 ## ✨ Features
 
-### 👥 Multi-Role System
+### 🩺 Patient (online, cloud-facing)
 
-<table>
-  <tr>
-    <td width="20%"><b>🩺 Patients</b></td>
-    <td>
-      • Book and manage appointments<br>
-      • View prescriptions and medical records<br>
-      • Make online payments via Paystack<br>
-      • Request medical reports<br>
-      • Track billing history and receipts
-    </td>
-  </tr>
-  <tr>
-    <td><b>👨‍⚕️ Doctors</b></td>
-    <td>
-      • Manage appointment queue<br>
-      • Create and update medical records<br>
-      • Write e-prescriptions with drug inventory integration<br>
-      • Track patient history<br>
-      • View revenue dashboard
-    </td>
-  </tr>
-  <tr>
-    <td><b>👔 Administrators</b></td>
-    <td>
-      • User management and role assignment<br>
-      • System logs and activity monitoring<br>
-      • Medical report request approvals<br>
-      • Full access to all system modules<br>
-      • Analytics and reporting
-    </td>
-  </tr>
-  <tr>
-    <td><b>📋 Receptionists</b></td>
-    <td>
-      • Appointment scheduling and management<br>
-      • Patient check-in and registration<br>
-      • Cash payment processing<br>
-      • Access to patient records<br>
-      • Billing support
-    </td>
-  </tr>
-  <tr>
-    <td><b>💊 Pharmacy</b></td>
-    <td>
-      • Drug inventory management<br>
-      • Prescription dispensing<br>
-      • Stock tracking and restocking<br>
-      • Sales records<br>
-      • Low-stock alerts
-    </td>
-  </tr>
-</table>
+- Register/log in (email+password or Google), book/reschedule/cancel appointments with a doctor
+- View own appointments, prescriptions, bills and receipts
+- Pay online via Paystack (currently **disabled** by default — see [Payments](#-payments)) or at the hospital desk
+- Request a copy of their medical report (admin-approved)
 
-### 🔐 Authentication & Security
+### 👨‍⚕️ Doctor
 
-- **JWT Token-Based Authentication**: Secure, stateless authentication
-- **Automatic Token Refresh**: Seamless user experience with background token renewal
-- **Password Reset Flow**: Email-based password recovery with token expiration
-- **Role-Based Access Control (RBAC)**: Fine-grained permissions per user role
-- **CORS Protection**: Secure cross-origin resource sharing
-- **Session Management**: Automatic logout on inactivity
+- Accept/decline the incoming online appointment queue
+- Full patient-folder access: create/edit visit records, view history, assign/transfer patients to themselves
+- Log dialysis sessions in a dedicated register-style view (auto-incrementing session number, all the fields a hemodialysis unit tracks — access type, machine, pre/post BP & weight, UF, duration, complications)
+- Admit a patient (ward, reason) and discharge them later — every visit record logged during that stay auto-links to the admission with no extra step
+- Order lab tests for a patient directly from their file
+- Write prescriptions against the drug inventory
+- View their own revenue dashboard
 
-### 📅 Appointment Management
+### 📋 Receptionist
 
-- **Smart Scheduling**: Prevents double-booking with conflict detection
-- **Multi-status Workflow**: Pending → Confirmed → Completed/Cancelled
-- **Email Notifications**: Automatic appointment confirmations and reminders
-- **Rescheduling**: Easy date/time changes with availability checking
-- **Cancellation Tracking**: Records reasons for quality improvement
-- **Doctor Queue Management**: Priority-based appointment viewing
+- Register walk-in families/patients (the same "New Folder" flow whether it's a genuine walk-in or a confirmed online booking)
+- Assign/transfer patients between doctors
+- Record cash/POS payments, view all bills and receipts
+- View the full cross-doctor schedule
+- Review the incoming online-booking sync queue and confirm or decline each request
 
-### 💰 Billing & Payments
+### 💊 Pharmacy
 
-- **Paystack Integration**: Secure online payments for Nigerian market
-- **Invoice Generation**: Itemized bills with platform fees and taxes
-- **Receipt Management**: Automatic receipt generation with PDF download
-- **Multiple Payment Methods**: Card, Bank Transfer, USSD, Mobile Money
-- **Cash Payment Support**: Reception desk payment recording
-- **Payment Webhooks**: Real-time payment verification
-- **Billing History**: Complete transaction records
+- Run the daily counter-sales register (open in the morning, add items as they're sold, auto-closes at 10pm if left open)
+- Manage drug inventory (add, restock, low-stock visibility)
+- Fulfill prescriptions
 
-### 💊 Prescription & Pharmacy
+### 🧪 Lab
 
-- **E-Prescription System**: Digital prescription creation and management
-- **Drug Inventory**: Real-time stock tracking with low-stock alerts
-- **Prescription Dispensing**: Mark prescriptions as fulfilled
-- **Refill Requests**: Patient-initiated prescription renewals
-- **Drug Search**: Quick lookup by name, category, or generic name
-- **Dosage Tracking**: Complete medication history per patient
+- A dedicated Lab Dashboard: a pending queue and a completed/history view
+- Receive orders either from a doctor (placed from inside a patient's file) or start one directly for a lab-only walk-in
+- Mark an order in-progress, then record a result — a typed summary, an uploaded file (PDF/image), or both
+- Email the result straight to the patient once complete (WhatsApp delivery is a planned follow-up, not built yet)
+- A small price catalog (`lab_tests`) drives autocomplete + billing, same pattern as the drug catalog
 
-### 📋 Medical Records
+### 👔 Admin
 
-- **Complete Patient History**: Diagnoses, treatments, lab results
-- **Secure Storage**: Encrypted sensitive medical data
-- **Doctor Notes**: Detailed consultation records
-- **Medical Report Requests**: Patient-initiated, admin-approved
-- **Document Uploads**: Support for lab results, X-rays, scans
-- **Search & Filter**: Quick access to historical records
+- Full user management: approve pending staff accounts, change roles, deactivate/delete
+- Browse the full, searchable system-wide audit log
+- Approve/reject medical report requests
+- Everything every other staff role can do, **plus** a dashboard role switcher: an admin account can toggle into the Doctor view (their own nav, their own doctor-scoped API access) without that ever granting an ordinary doctor account any admin access — it's one-directional, gated to the literal `admin` role only.
 
-### 🎨 UI/UX Features
+### 🌐 System-wide
 
-- **Dark Mode**: System-wide theme toggle
-- **Responsive Design**: Mobile, tablet, and desktop optimized
-- **Smooth Animations**: Framer Motion for delightful transitions
-- **Toast Notifications**: Real-time feedback for all actions
-- **Loading States**: Skeleton screens and progress indicators
-- **Form Validation**: Real-time input validation with helpful errors
-- **Accessibility**: WCAG 2.1 compliant interfaces
+- **Audit log**: nearly every write across every module (admissions, lab orders, invoices, user changes, sync decisions, etc.) is logged with actor, action, and description — browsable by admin under System Logs
+- **Automated backups**: daily database backup + retention cleanup + a health-check job that alerts by email if a backup goes missing or shrinks unexpectedly
+- **Dark mode**, responsive layout, toast-based feedback throughout
 
 ---
 
 ## 🛠 Tech Stack
 
-### Frontend (React SPA)
+### Frontend
 
-| Technology          | Version | Purpose             |
-| ------------------- | ------- | ------------------- |
-| **React**           | 19.1.1  | UI framework        |
-| **React Router**    | 6.30.1  | Client-side routing |
-| **TailwindCSS**     | 4.1.14  | Utility-first CSS   |
-| **Framer Motion**   | 12.23   | Animations          |
-| **Axios**           | 1.13.4  | HTTP client         |
-| **React Hook Form** | 7.71.1  | Form handling       |
-| **React Hot Toast** | 2.6.0   | Notifications       |
-| **Lucide React**    | 0.563   | Icon library        |
-| **Vite**            | 7.1.7   | Build tool          |
+| Technology | Purpose |
+| --- | --- |
+| React 19 + Vite | UI framework / build tool |
+| React Router 6 | Client-side routing |
+| Tailwind CSS 4 | Styling |
+| Framer Motion | Animations |
+| Axios | HTTP client, with an interceptor that auto-attaches the JWT and silently refreshes it |
+| Lucide React | Icons |
+| React Hot Toast | Notifications |
 
-### Backend (Laravel API)
+### Backend
 
-| Technology          | Version  | Purpose              |
-| ------------------- | -------- | -------------------- |
-| **Laravel**         | 12.0     | PHP framework        |
-| **PHP**             | 8.2+     | Server-side language |
-| **MySQL**           | 8.0+     | Relational database  |
-| **JWT Auth**        | 2.2      | Authentication       |
-| **Laravel Sanctum** | 4.0      | API tokens           |
-| **Resend**          | —        | Email service         |
-| **Composer**        | 2.x      | Dependency manager   |
+| Technology | Purpose |
+| --- | --- |
+| Laravel 12 / PHP 8.2+ | API framework |
+| MySQL 8+ | Database (one instance per deployment — cloud and local are separate databases) |
+| `tymon/jwt-auth` | API authentication — every protected endpoint is JWT-secured, not session-based |
+| `spatie/laravel-backup` | Scheduled database backups + health monitoring |
+| Resend | Transactional email (password reset, lab results, account approvals, contact form, bug reports) |
+| Laravel's own scheduler (`routes/console.php`) | Drives all recurring jobs — backups, pharmacy auto-close, and the offline sync cycle |
 
-### Third-Party Services
+### Third-party services
 
-- **Paystack**: Payment gateway for Nigeria
-- **Resend**: Transactional email delivery (password reset, appointment/report notifications)
-- **Laravel Herd**: Local development server (optional)
+- **Paystack** — card/bank/USSD payments (integration present, disabled by default; see [Payments](#-payments))
+- **Resend** — outbound email
+- **Google OAuth** — "Sign in with Google" alongside normal email/password
 
 ---
 
-## 🏗 System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       CLIENT LAYER                          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │   Browser    │  │    Mobile    │  │   Tablet     │     │
-│  │   (React)    │  │  (React PWA) │  │  (Adaptive)  │     │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘     │
-└─────────┼──────────────────┼──────────────────┼────────────┘
-          │                  │                  │
-          └──────────────────┴──────────────────┘
-                            │
-                    ┌───────▼────────┐
-                    │   API Gateway  │
-                    │   (Axios +     │
-                    │   Interceptors)│
-                    └───────┬────────┘
-                            │
-          ┌─────────────────┴─────────────────┐
-          │                                   │
-┌─────────▼──────────┐            ┌──────────▼─────────┐
-│  APPLICATION LAYER │            │  AUTHENTICATION    │
-│   (Laravel API)    │            │   (JWT Tokens)     │
-│                    │◄───────────┤   - Access Token   │
-│  - Controllers     │            │   - Refresh Token  │
-│  - Services        │            │   - Blacklisting   │
-│  - Middleware      │            └────────────────────┘
-│  - Validators      │
-└─────────┬──────────┘
-          │
-┌─────────▼──────────┐
-│   BUSINESS LOGIC   │
-│                    │
-│  ┌──────────────┐  │
-│  │ Appointments │  │
-│  ├──────────────┤  │
-│  │   Billing    │  │
-│  ├──────────────┤  │
-│  │Prescriptions │  │
-│  ├──────────────┤  │
-│  │   Payments   │  │
-│  ├──────────────┤  │
-│  │Medical Recs  │  │
-│  └──────────────┘  │
-└─────────┬──────────┘
-          │
-┌─────────▼──────────┐
-│   DATA LAYER       │
-│                    │
-│  ┌──────────────┐  │
-│  │    MySQL     │  │
-│  │   Database   │  │
-│  └──────────────┘  │
-│                    │
-│  Tables:           │
-│  • users           │
-│  • appointments    │
-│  • invoices        │
-│  • payments        │
-│  • prescriptions   │
-│  • medical_records │
-│  • drugs           │
-│  • receipts        │
-└────────────────────┘
-
-┌────────────────────┐
-│ EXTERNAL SERVICES  │
-│                    │
-│  ┌──────────────┐  │
-│  │   Paystack   │  │
-│  │   (Payments) │  │
-│  └──────────────┘  │
-│                    │
-│  ┌──────────────┐  │
-│  │ Mail Server  │  │
-│  │ (GMAIL/API)  │  │
-│  └──────────────┘  │
-└────────────────────┘
-```
-
-### Data Flow Example: Appointment Booking
-
-```
-Patient (React)
-      │
-      │ 1. POST /api/appointments
-      ▼
-API Interceptor
-      │
-      │ 2. Attach JWT token
-      ▼
-Laravel Middleware
-      │
-      │ 3. Verify token & role
-      ▼
-AppointmentController
-      │
-      │ 4. Validate data
-      │ 5. Check doctor availability
-      ▼
-Database
-      │
-      │ 6. Create appointment (status: pending)
-      │ 7. Create invoice
-      ▼
-BillingController
-      │
-      │ 8. Calculate fees (consultation + platform)
-      ▼
-Email Service
-      │
-      │ 9. Send confirmation to patient
-      │ 10. Notify doctor
-      ▼
-JSON Response → React
-      │
-      │ 11. Update UI
-      │ 12. Show success toast
-      │ 13. Redirect to "My Appointments"
-      ▼
-Patient sees booking confirmation
-```
-
----
-
-## 🚀 Quick Start
+## 🚀 Getting Started
 
 ### Prerequisites
 
-Before you begin, ensure you have the following installed:
+- PHP ≥ 8.2, Composer ≥ 2.0
+- Node.js ≥ 18, npm
+- MySQL ≥ 8.0
+- Git
 
-- **PHP** >= 8.2 ([Download](https://www.php.net/downloads))
-- **Composer** >= 2.0 ([Download](https://getcomposer.org/download/))
-- **Node.js** >= 18.x ([Download](https://nodejs.org/))
-- **npm** or **yarn** (comes with Node.js)
-- **MySQL** >= 8.0 ([Download](https://dev.mysql.com/downloads/))
-- **Git** ([Download](https://git-scm.com/downloads))
-
-**Optional but Recommended:**
-
-- Laravel Herd (for local development server)
-- Resend account (for email testing/delivery)
-- Paystack account (for payment testing)
-
-### Installation
-
-#### 1️⃣ Clone the Repository
+### 1. Clone
 
 ```bash
-git clone https://github.com/KabirMarzooq/HMS.git
-cd HMS
+git clone https://github.com/KabirMarzooq/A4.git
+cd A4
 ```
 
-#### 2️⃣ Backend Setup (Laravel)
+### 2. Backend (`A4backend/`)
 
 ```bash
-# Navigate to backend directory
-cd backend
-
-# Install PHP dependencies
+cd A4backend
 composer install
-
-# Copy environment file
 cp .env.example .env
-
-# Generate application key
 php artisan key:generate
-
-# Generate JWT secret
 php artisan jwt:secret
 ```
 
-#### 3️⃣ Configure Environment Variables
+**`.env` is extensively commented — read it, don't just fill in blanks.** Every variable explains what it's for and what breaks if it's misconfigured, including the offline-sync and CORS variables described in [Architecture](#-architecture). At minimum for local development, set:
 
-Edit `backend/.env` file:
+- `DB_DATABASE` / `DB_USERNAME` / `DB_PASSWORD` — then create that database and run `php artisan migrate`
+- `ADMIN_SECRET` — required to register the first admin account
+- `FRONTEND_URL` — wherever your frontend dev server runs (`http://localhost:5173` by default)
 
-```env
-# Application
-APP_NAME="A4 Medical Consortium"
-APP_ENV=local
-APP_DEBUG=true
-APP_URL=http://backend.test  # or http://localhost:8000
-
-# Frontend URL (for password reset emails)
-FRONTEND_URL=http://localhost:5173
-
-# Database
-DB_CONNECTION=mysql
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_DATABASE=hms_db
-DB_USERNAME=root
-DB_PASSWORD=your_password
-
-# JWT Configuration
-JWT_SECRET=your_jwt_secret_from_artisan_command
-JWT_TTL=60                    # Access token: 60 minutes
-JWT_REFRESH_TTL=20160         # Refresh token: 14 days
-JWT_BLACKLIST_ENABLED=true
-JWT_BLACKLIST_GRACE_PERIOD=30
-
-# Admin Secret (for admin registration)
-ADMIN_SECRET=your_secure_admin_key_here
-
-# Email Configuration (Resend — https://resend.com)
-# Create an account under the hospital's own email, verify a sending
-# domain, then paste the API key below. Leave MAIL_MAILER=log during local
-# development if you don't want to burn real sends.
-MAIL_MAILER=resend
-MAIL_FROM_ADDRESS="notifications@yourhospitaldomain.com"
-RESEND_API_KEY=re_xxxxxxxxxxxxxxxxxxxxxxxx
-
-# Paystack (for payments)
-PAYSTACK_SECRET_KEY=sk_test_xxxxxxxxxxxxx
-PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxxxxx
-```
-
-#### 4️⃣ Database Setup
+Leave `MAIL_MAILER=log` during development (emails get written to `storage/logs/laravel.log` instead of actually sending) and `PAYSTACK_ENABLED=false` unless you're specifically testing payments.
 
 ```bash
-# Create database
-mysql -u root -p
-CREATE DATABASE hms_db;
-exit;
-
-# Run migrations
 php artisan migrate
-
-# (Optional) Import sample data
-mysql -u root -p hms_db < ../hms_db.sql
+php artisan storage:link   # required for lab-result file uploads to be servable
 ```
 
-#### 5️⃣ Frontend Setup (React)
+Run it (Laravel Herd, or):
 
 ```bash
-# Navigate to frontend directory
-cd ../Frontend
-
-# Install Node dependencies
-npm install
-
-# Create environment file
-echo "VITE_API_URL=http://backend.test/api" > .env
-# OR for local PHP server:
-# echo "VITE_API_URL=http://localhost:8000/api" > .env
-```
-
-### Running the Application
-
-#### Development Mode
-
-**Terminal 1 - Backend (Laravel):**
-
-```bash
-cd backend
-
-# Option 1: Using Laravel Herd (Recommended)
-# Just navigate to http://backend.test in browser
-# Herd automatically serves your app
-
-# Option 2: Using PHP built-in server
 php artisan serve
-# Backend will run on http://localhost:8000
 ```
 
-**Terminal 2 - Frontend (React + Vite):**
+### 3. Frontend (`Frontend/`) — two separate builds
+
+This app produces **two different frontend builds from the same source**, because the API URL a build talks to is baked in at build time (Vite), not switchable at runtime:
 
 ```bash
-cd Frontend
-npm run dev
-# Frontend will run on http://localhost:5173
+cd ../Frontend
+npm install
+cp .env.example .env          # points at the cloud/dev backend by default
+npm run dev                    # local dev server, http://localhost:5173
 ```
 
-**Access the application:**
+- `npm run build` → `dist/` — the **cloud** build (what Vercel deploys), reads `.env`
+- `npm run build:hospital` → `dist-hospital/` — the **local** build for the hospital's own machine, reads `Frontend/.env.hospital` (edit that file's `VITE_API_BASE_URL` to point at wherever the local backend actually runs before building)
 
-- Frontend: [http://localhost:5173](http://localhost:5173)
-- Backend API: [http://backend.test/api](http://backend.test/api) or [http://localhost:8000/api](http://localhost:8000/api)
+### 4. Deploying for real
 
-#### Production Build
-
-```bash
-# Build frontend for production
-cd Frontend
-npm run build
-
-# The build output will be in Frontend/dist/
-# Deploy this folder to your web server (Netlify, Vercel, etc.)
-
-# For backend, configure your web server (Apache/Nginx)
-# to point to backend/public directory
-```
+- **Cloud**: Vercel (frontend, `npm run build`) + Railway (backend). Set `CORS_ALLOWED_ORIGINS` on Railway to the real Vercel domain; leave `SYNC_CLOUD_URL` unset there.
+- **Local hospital server**: run the backend there too (own MySQL database, own `php artisan migrate`), serve the `dist-hospital/` build, set `SYNC_SECRET` to the *same* value as the cloud deployment and `SYNC_CLOUD_URL` to the real Railway URL. Schedule `php artisan schedule:run` to fire every minute (Windows Task Scheduler, "run whether user is logged on or not") — that single entry drives the 5-minute sync cycle along with every other scheduled job.
 
 ---
 
 ## 📁 Project Structure
 
 ```
-HMS/
-│
-├── Frontend/                   # React SPA
-│   ├── public/                # Static assets
-│   ├── src/
-│   │   ├── assets/           # Images, fonts
-│   │   ├── components/       # Reusable React components
-│   │   │   ├── Dashboard.jsx        # Main dashboard layout
-│   │   │   ├── ProtectedRoute.jsx   # Auth guard
-│   │   │   └── RoleHome.jsx         # Role-based home pages
-│   │   ├── layouts/          # Page layouts
-│   │   │   ├── MainLayout.jsx       # Public pages layout
-│   │   │   ├── ThemeContext.jsx     # Dark mode provider
-│   │   │   └── ScrollToTop.jsx      # Scroll behavior
-│   │   ├── pages/            # Public & auth pages
-│   │   │   ├── Home.jsx             # Landing page
-│   │   │   ├── About.jsx
-│   │   │   ├── Services.jsx
-│   │   │   ├── Contact.jsx
-│   │   │   ├── LogIn.jsx            # Login page
-│   │   │   ├── SignUp.jsx           # Registration
-│   │   │   ├── ForgotPassword.jsx   # Password reset request
-│   │   │   └── ResetPassword.jsx    # Password reset form
-│   │   ├── sections/         # Dashboard sections (role-specific)
-│   │   │   ├── Overview.jsx         # Doctor dashboard
-│   │   │   ├── DoctorSchedule.jsx   # Doctor appointments
-│   │   │   ├── MyAppointments.jsx   # Patient appointments
-│   │   │   ├── BookAppointment.jsx  # Appointment booking
-│   │   │   ├── Prescriptions.jsx    # Doctor prescriptions
-│   │   │   ├── Pharmacy.jsx         # Patient prescriptions
-│   │   │   ├── MedicalRecords.jsx   # Doctor medical records
-│   │   │   ├── MedicalReports.jsx   # Patient reports
-│   │   │   ├── Billings.jsx         # Patient billing
-│   │   │   ├── BillsandReceipts.jsx # Reception billing
-│   │   │   ├── Users.jsx            # Admin user management
-│   │   │   ├── SystemLogs.jsx       # Admin logs
-│   │   │   ├── Inventory.jsx        # Pharmacy inventory
-│   │   │   ├── Settings.jsx         # User settings
-│   │   │   ├── Profile.jsx          # User profile
-│   │   │   └── Support.jsx          # Help & support
-│   │   ├── services/         # API integration
-│   │   │   └── api.js               # Axios instance + interceptors
-│   │   ├── utils/            # Utility functions
-│   │   │   └── tokenRefresh.js      # Auto token refresh
-│   │   ├── App.jsx           # Root component + routing
-│   │   ├── main.jsx          # Entry point
-│   │   └── index.css         # Global styles
-│   ├── package.json          # Node dependencies
-│   ├── vite.config.js        # Vite configuration
-│   └── tailwind.config.js    # TailwindCSS config
-│
-├── backend/                   # Laravel API
+A4/
+├── A4backend/                          # Laravel API
 │   ├── app/
-│   │   ├── Http/
-│   │   │   ├── Controllers/
-│   │   │   │   ├── AuthController.php           # Auth endpoints
-│   │   │   │   ├── AppointmentController.php    # Appointments
-│   │   │   │   ├── BillingController.php        # Patient billing
-│   │   │   │   ├── ReceptionBillingController.php # Reception billing
-│   │   │   │   ├── PaystackController.php       # Payment gateway
-│   │   │   │   ├── PrescriptionController.php   # Prescriptions
-│   │   │   │   ├── MedicalRecordController.php  # Medical records
-│   │   │   │   ├── DrugController.php           # Pharmacy inventory
-│   │   │   │   ├── DashboardController.php      # Dashboard stats
-│   │   │   │   ├── UserSettingsController.php   # User settings
-│   │   │   │   └── Admin/
-│   │   │   │       ├── AdminUserController.php  # User management
-│   │   │   │       ├── AdminScheduleController.php
-│   │   │   │       └── AdminSystemLogController.php
-│   │   │   └── Middleware/
-│   │   │       └── RoleMiddleware.php           # RBAC
-│   │   ├── Models/
-│   │   │   ├── User.php
-│   │   │   ├── Appointment.php
-│   │   │   ├── Invoice.php
-│   │   │   ├── InvoiceItem.php
-│   │   │   ├── Payment.php
-│   │   │   ├── Receipt.php
-│   │   │   ├── Prescription.php
-│   │   │   ├── PrescriptionItem.php
-│   │   │   ├── MedicalRecord.php
-│   │   │   ├── Drug.php
-│   │   │   ├── SystemLog.php
-│   │   │   └── MedicalReportRequest.php
-│   │   └── Mail/              # Email templates
-│   ├── config/
-│   │   ├── jwt.php           # JWT configuration
-│   │   ├── cors.php          # CORS settings
-│   │   └── database.php      # Database config
-│   ├── database/
-│   │   ├── migrations/       # Database schema
-│   │   └── seeders/          # Sample data
-│   ├── resources/
-│   │   └── views/
-│   │       └── emails/
-│   │           └── password-reset.blade.php
+│   │   ├── Http/Controllers/           # ~24 controllers, one per feature area
+│   │   │   └── Admin/                  # Admin-only controllers (users, logs, schedules)
+│   │   ├── Models/                     # Eloquent models
+│   │   ├── Observers/                  # System-log audit trail — one per write-heavy model
+│   │   ├── Console/Commands/           # sync:pull, sync:push, sync:run
+│   │   └── Http/Middleware/            # RoleMiddleware, VerifySyncKey, etc.
+│   ├── config/                         # cors.php, backup.php, services.php, jwt.php...
+│   ├── database/migrations/            # Full schema history — the real source of truth for the data model
+│   ├── resources/views/emails/         # Blade email templates
 │   ├── routes/
-│   │   └── api.php           # API routes
-│   ├── .env                  # Environment variables
-│   ├── composer.json         # PHP dependencies
-│   └── artisan               # Laravel CLI
+│   │   ├── api.php                     # Every API route, grouped by role/feature
+│   │   └── console.php                 # All scheduled jobs
+│   └── .env.example                    # Fully documented — read this before deploying
 │
-├── hms_db.sql                # Sample database dump
-└── README.md                 # This file
+└── Frontend/                           # React SPA
+    ├── src/
+    │   ├── components/                 # Dashboard shell, route guards, role-based home redirect
+    │   ├── pages/                      # Public site + auth pages
+    │   ├── sections/                   # One file per dashboard screen, per role
+    │   ├── services/api.js             # Axios instance, JWT interceptor, auto-refresh
+    │   └── utils/tokenRefresh.js
+    ├── .env.example                    # Cloud/dev build config
+    └── .env.hospital                   # Local hospital build config
 ```
 
 ---
 
-## 🧩 Core Modules
+## 🧩 Core Systems
 
-### 1. Authentication System
+### Patient records: folders → files → visit records
 
-**JWT Token Flow:**
+A `PatientFolder` (family) contains one or more `PatientFile`s (individuals). Every clinical encounter is a `VisitRecord` against a file — a general visit, a dialysis session (`visit_type = dialysis`, its own register-style tab, session numbers computed server-side and never client-editable), or a round-note during an inpatient stay (auto-linked to the active `Admission` with zero extra doctor action). Lab orders (`LabOrder`) hang off a `PatientFile` too, optionally linked to the visit record they were ordered from.
 
-- **Access Token**: 60-minute lifespan for API requests
-- **Refresh Token**: 14-day lifespan for automatic renewal
-- **Auto-refresh**: Frontend refreshes token every 50 minutes
-- **Blacklisting**: Logout invalidates tokens on backend
+### Billing
 
-**Password Reset:**
+Billing is per-encounter, not a fixed platform fee: a doctor enters whatever the consultation actually cost on the visit record itself (or a lab order's price, pulled from the lab test catalog), which generates an `Invoice` the receptionist can then record a cash/POS payment against — or the patient can pay online if Paystack is enabled. There's no separate "admission" or "dialysis" charge type; a stay or a dialysis program bills exactly the same way every individual visit within it does.
 
-1. User requests reset → Email sent with token
-2. Token valid for 60 minutes
-3. User sets new password → Token deleted
-4. Automatic redirect to login
+### Admissions
 
-### 2. Appointment Workflow
+`Admission` tracks ward, admission/discharge dates, and status (`admitted`/`discharged`). A patient's file shows a live "Admitted — Ward: X — Day N" badge while active. Discharging just closes out the admission record — any billing that happened during the stay already went through the normal per-visit flow above.
 
-```
-Patient Books → Doctor Receives Notification → Doctor Accepts/Declines
-                                                         │
-                                                         ├─ Accept → Invoice Created
-                                                         │            Patient Pays
-                                                         │            Appointment Confirmed
-                                                         │            Doctor Sees Patient
-                                                         │            Marks Completed
-                                                         │
-                                                         └─ Decline → Cancellation Email
-                                                                      Reason Recorded
-```
+### Offline sync
 
-### 3. Billing System
+Covered in [Architecture](#-architecture) — the mechanism that lets online bookings reach the hospital's local, possibly-offline system, and lets a receptionist's decision reach the patient back online.
 
-**Invoice Components:**
+### Audit logging
 
-- **Consultation Fee**: Doctor-specific or default rate
-- **Platform Fee**: 10% of consultation fee
-- **Emergency Surcharge**: +50% for after-hours
-- **Tax**: VAT where applicable
-
-**Payment Flow:**
-
-```
-Appointment Accepted → Invoice Generated → Patient Notified
-                                               │
-                                               ├─ Pay Online → Paystack Gateway
-                                               │                    │
-                                               │                    ├─ Success → Receipt Generated
-                                               │                    │            Appointment Confirmed
-                                               │                    │
-                                               │                    └─ Failed → Retry Option
-                                               │
-                                               └─ Pay Cash → Reception Records
-                                                             Receipt Generated
-                                                             Appointment Confirmed
-```
-
-### 4. Prescription Management
-
-**Doctor Workflow:**
-
-1. View patient during appointment
-2. Create prescription with multiple drugs
-3. System checks drug inventory
-4. Prescription sent to pharmacy
-5. Patient notified via email
-
-**Pharmacy Workflow:**
-
-1. View pending prescriptions
-2. Dispense drugs (update inventory)
-3. Mark prescription as fulfilled
-4. Generate receipt
-
-**Patient Workflow:**
-
-1. View prescribed medications
-2. Request refills
-3. Track dispensing status
-4. Download prescription PDFs
+`SystemLog` + a per-model Observer pattern: `AdmissionObserver`, `LabOrderObserver`, `SyncedBookingRequestObserver`, `InvoiceObserver`, etc. — each one logs the relevant state transitions (created, status changes) with the acting user, role, and a human-readable description, browsable by admin under System Logs with search and action-type filtering.
 
 ---
 
-## 📡 API Documentation
+## 📡 API Reference
 
-### Base URL
+All endpoints are under `/api`, JWT-authenticated (`Authorization: Bearer {token}`) unless noted otherwise. `routes/api.php` is the authoritative, always-current list — grouped exactly as below with comment headers matching these names. This table is a map of *where things live*, not an exhaustive endpoint-by-endpoint listing (that lives in the route file itself, so it can't drift out of sync with this doc).
 
-```
-Production: https://your-domain.com/api
-Development: http://backend.test/api or http://localhost:8000/api
-```
-
-### Authentication
-
-All protected endpoints require a Bearer token in the Authorization header:
-
-```
-Authorization: Bearer {access_token}
-```
-
-### Core Endpoints
-
-#### Authentication
-
-| Method | Endpoint                | Description            | Auth Required   |
-| ------ | ----------------------- | ---------------------- | --------------- |
-| POST   | `/auth/register`        | Register new user      | No              |
-| POST   | `/auth/login`           | Login user             | No              |
-| POST   | `/auth/refresh`         | Refresh access token   | Yes (any token) |
-| POST   | `/auth/logout`          | Logout user            | Yes             |
-| GET    | `/auth/me`              | Get current user       | Yes             |
-| POST   | `/auth/forgot-password` | Request password reset | No              |
-| POST   | `/auth/reset-password`  | Reset password         | No              |
-
-**Example Login Request:**
-
-```json
-POST /api/auth/login
-Content-Type: application/json
-
-{
-  "email": "patient@example.com",
-  "password": "SecurePass123"
-}
-```
-
-**Example Response:**
-
-```json
-{
-  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
-  "token_type": "bearer",
-  "expires_in": 3600,
-  "user": {
-    "id": 1,
-    "name": "John Doe",
-    "email": "patient@example.com",
-    "role": "patient"
-  }
-}
-```
-
-#### Appointments
-
-| Method | Endpoint                        | Description             | Access  |
-| ------ | ------------------------------- | ----------------------- | ------- |
-| POST   | `/appointments`                 | Book appointment        | Patient |
-| GET    | `/my-appointments`              | Get user's appointments | Patient |
-| GET    | `/doctor/appointments`          | Get doctor's queue      | Doctor  |
-| PATCH  | `/appointments/{id}/accept`     | Accept appointment      | Doctor  |
-| PATCH  | `/appointments/{id}/decline`    | Decline appointment     | Doctor  |
-| PATCH  | `/appointments/{id}/cancel`     | Cancel appointment      | Patient |
-| PATCH  | `/appointments/{id}/reschedule` | Reschedule appointment  | Patient |
-
-#### Billing
-
-| Method | Endpoint                        | Description         | Access  |
-| ------ | ------------------------------- | ------------------- | ------- |
-| GET    | `/patient/bills`                | Get patient bills   | Patient |
-| GET    | `/patient/bills/{id}`           | Get invoice details | Patient |
-| GET    | `/patient/receipts/{id}`        | Get receipt         | Patient |
-| POST   | `/patient/payment/initialize`   | Initialize payment  | Patient |
-| GET    | `/patient/payment/verify/{ref}` | Verify payment      | Patient |
-| POST   | `/webhook/paystack`             | Paystack webhook    | Public  |
-
-#### Prescriptions
-
-| Method | Endpoint                             | Description                 | Access                      |
-| ------ | ------------------------------------ | --------------------------- | --------------------------- |
-| POST   | `/doctor/prescriptions`              | Create prescription         | Doctor                      |
-| GET    | `/doctor/prescriptions`              | Get doctor's prescriptions  | Doctor                      |
-| GET    | `/patient/prescriptions`             | Get patient's prescriptions | Patient                     |
-| POST   | `/patient/prescriptions/{id}/refill` | Request refill              | Patient                     |
-| GET    | `/prescriptions`                     | Get all prescriptions       | Admin/Receptionist/Pharmacy |
-
-### Error Responses
-
-All errors follow this format:
-
-```json
-{
-  "message": "Human-readable error message",
-  "errors": {
-    "field_name": ["Validation error for this field"]
-  }
-}
-```
-
-**HTTP Status Codes:**
-
-- `200` - Success
-- `201` - Resource created
-- `400` - Bad request / Validation error
-- `401` - Unauthorized / Invalid token
-- `403` - Forbidden / Insufficient permissions
-- `404` - Resource not found
-- `422` - Unprocessable entity
-- `500` - Server error
+| Route group | Who can call it | What it covers |
+| --- | --- | --- |
+| `/auth/*` | Public | Register, login, refresh, logout, forgot/reset password |
+| `/auth/google/*` | Public | Google OAuth redirect + callback |
+| `/appointments`, `/my-appointments`, `/doctors` | Authenticated patient | Book, view, cancel, reschedule |
+| `/doctor/*` | Doctor **+ Admin** (via the role switcher) | Appointment queue, accept/decline, dashboard overview, revenue |
+| `/patient/*` | Patient | Own prescriptions, bills, receipts, Paystack init/verify, report requests |
+| `/admin/*` | Admin only | User management, system logs, report-request approvals |
+| `/schedules` | Receptionist, Admin | Cross-doctor schedule view |
+| `/reception/*` | Receptionist, Admin, Pharmacy | Bills/receipts, cash & card payment recording |
+| `/pharmacy/sales/*` | Pharmacy, Admin, Receptionist | Counter-sales register |
+| `/pharmacy/drugs` | Pharmacy, Admin, Doctor | Drug inventory CRUD |
+| `/folders/*` | Doctor, Receptionist, Admin (read-only subset also **Lab**) | Family folders, patient files, visit records, transfers, admissions |
+| `/lab-tests`, `/lab-orders/*` | Doctor, Lab, Admin | Test catalog, order lifecycle, results, email delivery |
+| `/sync/*` | Machine-to-machine (`X-Sync-Key` header, not JWT) | Cloud-side pull/push endpoints for the offline sync bridge |
+| `/sync-requests/*` | Receptionist, Admin | Local-side incoming online-booking queue |
+| `/webhook/paystack` | Public (Paystack's servers) | Payment confirmation webhook |
+| `/contact`, `/report-issue` | Public / authenticated | Contact form, bug reports |
 
 ---
 
-## 👥 User Roles & Permissions
+## 👥 Roles & Permissions
 
-### Permission Matrix
+Six roles: `patient`, `doctor`, `receptionist`, `pharmacy`, `lab`, `admin`. Patient, doctor, receptionist, pharmacy, and lab all self-register; **doctor/receptionist/pharmacy/lab accounts start `pending`** and need an admin to approve them from the Users tab before they can log in. Admin registration requires the `ADMIN_SECRET` env value.
 
-| Feature                    | Patient | Doctor   | Receptionist | Pharmacy | Admin |
-| -------------------------- | ------- | -------- | ------------ | -------- | ----- |
-| **Appointments**           |
-| Book appointment           | ✅      | ✅       | ✅           | ✅       | ✅    |
-| View own appointments      | ✅      | ✅       | ✅           | ✅       | ✅    |
-| View all appointments      | ❌      | ❌       | ✅           | ❌       | ✅    |
-| Accept/Decline appointment | ❌      | ✅       | ❌           | ❌       | ❌    |
-| **Billing**                |
-| View own bills             | ✅      | ❌       | ❌           | ❌       | ❌    |
-| Pay online                 | ✅      | ❌       | ❌           | ❌       | ❌    |
-| Record cash payment        | ❌      | ❌       | ✅           | ❌       | ✅    |
-| View all bills             | ❌      | ❌       | ✅           | ✅       | ✅    |
-| **Prescriptions**          |
-| View own prescriptions     | ✅      | ❌       | ❌           | ❌       | ❌    |
-| Create prescription        | ❌      | ✅       | ❌           | ❌       | ❌    |
-| Dispense medication        | ❌      | ❌       | ❌           | ✅       | ❌    |
-| View all prescriptions     | ❌      | ❌       | ✅           | ✅       | ✅    |
-| **Medical Records**        |
-| View own records           | ✅      | ❌       | ❌           | ❌       | ❌    |
-| Create/Edit records        | ❌      | ✅       | ❌           | ❌       | ❌    |
-| View patient records       | ❌      | ✅       | ✅           | ❌       | ✅    |
-| Request medical report     | ✅      | ❌       | ❌           | ❌       | ❌    |
-| Approve report request     | ❌      | ❌       | ❌           | ❌       | ✅    |
-| **Inventory**              |
-| View drug inventory        | ❌      | ✅       | ❌           | ✅       | ✅    |
-| Add/Edit drugs             | ❌      | ❌       | ❌           | ✅       | ✅    |
-| Restock drugs              | ❌      | ❌       | ❌           | ✅       | ✅    |
-| **User Management**        |
-| Update own profile         | ✅      | ✅       | ✅           | ✅       | ✅    |
-| View all users             | ❌      | ❌       | ❌           | ❌       | ✅    |
-| Change user roles          | ❌      | ❌       | ❌           | ❌       | ✅    |
-| Delete users               | ❌      | ❌       | ❌           | ❌       | ✅    |
-| **System**                 |
-| View system logs           | ❌      | ❌       | ❌           | ❌       | ✅    |
-| View analytics             | ❌      | ✅       | ❌           | ❌       | ✅    |
-
-### Role Registration
-
-- **Patient, Doctor, Receptionist, Pharmacy**: Self-registration with email verification
-- **Admin**: Requires `ADMIN_SECRET` key during registration
+| Capability | Patient | Doctor | Receptionist | Pharmacy | Lab | Admin |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| Book/view own appointments | ✅ | — | — | — | — | — |
+| Accept/decline appointment queue | — | ✅ | — | — | — | ✅ (via role switch) |
+| Patient folders — read/write | — | ✅ | ✅ | — | — | ✅ |
+| Patient folders — read only | — | — | — | — | ✅ | — |
+| Dialysis / admissions | — | ✅ | — | — | — | ✅ (via role switch) |
+| Order lab tests | — | ✅ | — | — | — | ✅ |
+| Fulfil lab orders, email results | — | — | — | — | ✅ | ✅ |
+| Prescriptions — write | — | ✅ | — | — | — | — |
+| Prescriptions — dispense | — | — | — | ✅ | — | — |
+| Drug inventory | — | view | — | ✅ | — | ✅ |
+| Counter sales register | — | — | ✅ | ✅ | — | ✅ |
+| Cash/card payment recording | — | — | ✅ | ✅ (desk) | — | ✅ |
+| Sync requests queue | — | — | ✅ | — | — | ✅ |
+| User management, system logs | — | — | — | — | — | ✅ |
 
 ---
 
-## 🔒 Security Features
+## 🔒 Security
 
-### 1. Authentication Security
+- **JWT authentication** (`tymon/jwt-auth`) — every protected route requires a valid bearer token; role checks happen server-side via `RoleMiddleware` on every route group, mirrored (not replaced) by frontend route guards
+- **Named rate limiters** on the sensitive endpoints specifically — `login`, `register`, `forgot-password`, `reset-password`, `contact-form` — plus a blanket per-user/per-IP limit on every other API route as defense-in-depth
+- **CORS**: origin allowlist, configurable via `CORS_ALLOWED_ORIGINS` (see [Architecture](#-architecture))
+- **Offline sync** endpoints are authenticated by a separate shared-secret header (`X-Sync-Key`), compared with `hash_equals()` — there's no logged-in user on either end of that machine-to-machine call
+- **Least-privilege data access**: e.g. the Lab role gets read-only patient lookup, not write access to clinical records; Pharmacy is excluded from the folders/visit-records API entirely
+- Passwords hashed via bcrypt (`BCRYPT_ROUNDS`, configurable)
 
-- **Password Hashing**: Bcrypt with cost factor 10
-- **JWT Tokens**: RS256 algorithm with rotation
-- **Token Blacklisting**: Logout invalidates tokens permanently
-- **Refresh Token Strategy**: Separate short-lived access + long-lived refresh
-- **Password Reset**: Time-limited tokens (60 minutes)
-
-### 2. API Security
-
-- **CORS Protection**: Whitelist-based origin validation
-- **Rate Limiting**: 60 requests/minute per IP
-- **SQL Injection Prevention**: Eloquent ORM parameterized queries
-- **XSS Protection**: Input sanitization + output escaping
-- **CSRF Protection**: Token-based for state-changing operations
-
-### 3. Data Protection
-
-- **Sensitive Data Encryption**: Medical records encrypted at rest
-- **HTTPS Enforcement**: Production requires SSL/TLS
-- **Database Encryption**: Password fields hashed, not encrypted
-- **File Upload Validation**: Type, size, and content checking
-- **Audit Logging**: All critical actions logged with user ID
-
-### 4. Access Control
-
-- **Role-Based Access Control (RBAC)**: Middleware-enforced permissions
-- **Route Protection**: Frontend + backend guards
-- **Principle of Least Privilege**: Users only access necessary resources
-- **Session Management**: Automatic timeout after inactivity
+No field-level encryption-at-rest is implemented for clinical data — protection currently relies on access control, not encryption. Worth knowing if this is being evaluated against a specific compliance standard.
 
 ---
 
-## 💳 Payment Integration
+## 💳 Payments
 
-### Paystack Setup
-
-1. **Create Paystack Account**: [https://paystack.com/](https://paystack.com/)
-
-2. **Get API Keys**:
-
-   - Login to Paystack Dashboard
-   - Navigate to Settings → API Keys & Webhooks
-   - Copy **Secret Key** and **Public Key**
-
-3. **Configure Backend**:
-
-```env
-# backend/.env
-PAYSTACK_SECRET_KEY=sk_test_xxxxxxxxxxxxx
-PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxxxxx
-```
-
-4. **Set Webhook URL**:
-   - Paystack Dashboard → Settings → Webhooks
-   - Add: `https://your-domain.com/api/webhook/paystack`
-   - Events: `charge.success`, `charge.failed`
-
-### Payment Flow
-
-```
-Patient clicks "Pay Now" → Frontend initializes payment → Paystack returns URL
-                                                                    │
-                                                                    ▼
-                                                      Patient redirected to Paystack
-                                                                    │
-                                    ┌───────────────────────────────┴───────────────────────────────┐
-                                    │                                                               │
-                                    ▼                                                               ▼
-                        Payment Successful                                              Payment Failed
-                                    │                                                               │
-                                    ▼                                                               ▼
-                    Webhook triggers backend                                     User redirected back
-                    Backend verifies payment                                      "Payment Failed" toast
-                    Updates invoice status
-                    Generates receipt
-                    Sends email
-                                    │
-                                    ▼
-                    User redirected to success page
-                    "Payment Successful" toast
-                    Receipt available for download
-```
-
----
-
-## 🎭 Demo Accounts
-
-Use these credentials to test different roles:
-
-| Role             | Email                              | Password           |
-| ---------------- | ----------------------------------- | ------------------ |
-| **Patient**      | patient.demo@a4medicalconsortium.com     | ChangeMe123!  |
-| **Doctor**       | doctor.demo@a4medicalconsortium.com      | ChangeMe123!  |
-| **Admin**        | admin.demo@a4medicalconsortium.com       | ChangeMe123!  |
-| **Receptionist** | reception.demo@a4medicalconsortium.com   | ChangeMe123!  |
-| **Pharmacy**     | pharmacy.demo@a4medicalconsortium.com    | ChangeMe123!  |
-
-**Note**: These are placeholder demo accounts for local testing only — no such accounts exist by default. Never seed a production database with real personal email addresses or shared passwords; create each staff account for real during admin approval instead.
+Paystack integration exists in the codebase but is **disabled by default** (`PAYSTACK_ENABLED=false`) — this deployment collects payment physically (cash/POS/transfer) at the reception desk instead, recorded via `ReceptionBillingController`. To re-enable online card payment: set real `PAYSTACK_SECRET_KEY`/`PAYSTACK_PUBLIC_KEY` from a [Paystack dashboard](https://dashboard.paystack.com/#/settings/developer), flip `PAYSTACK_ENABLED=true`, and register the webhook URL (`/api/webhook/paystack`) in Paystack's dashboard settings. No code changes are needed to turn it back on.
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions from the community! Here's how you can help:
+1. Fork the repo, `git clone` your fork
+2. `git checkout -b feature/your-feature`
+3. Make your change — and **if it changes what the system does, update this README to match** (see the note at the top of this file's history: this doc is meant to track reality, not a point-in-time snapshot)
+4. Commit using conventional prefixes (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`)
+5. Push and open a PR describing what changed and why
 
-### Ways to Contribute
-
-- 🐛 **Report Bugs**: Open an issue with detailed reproduction steps
-- 💡 **Suggest Features**: Share your ideas for improvements
-- 📝 **Improve Documentation**: Fix typos, add examples, clarify instructions
-- 💻 **Submit Code**: Fork, code, and create pull requests
-
-### Development Workflow
-
-1. **Fork the Repository**
-
-```bash
-git clone https://github.com/KabirMarzooq/HMS.git
-cd HMS
-```
-
-2. **Create a Feature Branch**
-
-```bash
-git checkout -b feature/amazing-feature
-```
-
-3. **Make Your Changes**
-
-   - Follow existing code style
-   - Add tests for new features
-   - Update documentation
-
-4. **Commit Your Changes**
-
-```bash
-git add .
-git commit -m "feat: add amazing feature"
-```
-
-**Commit Message Convention:**
-
-- `feat:` New feature
-- `fix:` Bug fix
-- `docs:` Documentation changes
-- `style:` Code style changes (formatting, etc.)
-- `refactor:` Code refactoring
-- `test:` Adding or updating tests
-- `chore:` Maintenance tasks
-
-5. **Push to Your Fork**
-
-```bash
-git push origin feature/amazing-feature
-```
-
-6. **Create Pull Request**
-   - Go to original repository
-   - Click "New Pull Request"
-   - Select your branch
-   - Describe your changes
-
-### Code Style Guidelines
-
-**PHP (Laravel):**
-
-- Follow [PSR-12](https://www.php-fig.org/psr/psr-12/) coding standard
-- Use type hints for method parameters and return types
-- Write meaningful variable and method names
-
-**JavaScript (React):**
-
-- Use ES6+ syntax
-- Functional components with hooks
-- PropTypes for component props
-- Consistent naming: `camelCase` for variables, `PascalCase` for components
-
-**CSS (TailwindCSS):**
-
-- Use utility classes first
-- Extract repeating patterns into components
-- Follow mobile-first responsive design
+**Code style**: PSR-12 for PHP, functional components + hooks for React, Tailwind utility classes first.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
-
-```
-MIT License
-
-Copyright (c) 2026 A4 Medical Consortium Contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+No `LICENSE` file exists in this repository — treat it as **all rights reserved / proprietary** by default, not open source, until a specific license is deliberately added. (An earlier version of this README claimed MIT without an actual license file backing it — that was inaccurate and has been corrected.)
 
 ---
 
 ## 💬 Support
 
-Need help? We're here for you!
-
-### 📧 Contact
-
 - **Email**: a4consortium@gmail.com
-- **GitHub Issues**: [Report a bug](https://github.com/KabirMarzooq/HMS/issues)
-- **Discussions**: [Ask questions](https://github.com/KabirMarzooq/HMS/discussions)
-
-### 🐛 Found a Bug?
-
-1. Check [existing issues](https://github.com/KabirMarzooq/HMS/issues)
-2. If not found, [create a new issue](https://github.com/KabirMarzooq/HMS/issues/new)
-3. Include:
-   - Clear description
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Screenshots (if applicable)
-   - Browser/OS version
-
----
-
-## 🙏 Acknowledgments
-
-Special thanks to:
-
-- **Laravel Team** - For the amazing PHP framework
-- **React Team** - For the revolutionary UI library
-- **TailwindCSS** - For making CSS enjoyable again
-- **Paystack** - For reliable payment infrastructure
+- **GitHub Issues**: [github.com/KabirMarzooq/A4/issues](https://github.com/KabirMarzooq/A4/issues)
 
 ---
 
 ## 🗺️ Roadmap
 
-### Version 2.0 (Planned)
+Not built yet, genuinely planned:
 
-- [ ] Mobile App (React Native)
-- [ ] Telemedicine (Video Consultations)
-- [ ] AI-Powered Diagnosis Suggestions
-- [ ] Multi-Language Support
-- [ ] Advanced Analytics Dashboard
-- [ ] Insurance Integration
-- [ ] Lab Integration (LIMS)
-- [ ] Radiology Integration (PACS)
-- [ ] Bed Management System
-- [ ] Staff Attendance Tracking
-- [ ] Patient Portal (Self-Service)
-- [ ] Emergency Alerts System
-
----
-
-## ⭐ Star History
-
-If you find this project useful, please consider giving it a star! ⭐
+- [ ] WhatsApp delivery for lab results (email delivery is built; WhatsApp needs a WhatsApp Business API integration — real setup work, deliberately deferred)
+- [ ] Cloud-side appointment cancellations reflecting back down into an already-pulled local sync request (currently a known gap — see `SyncPullAppointments`'s doc comment)
+- [ ] Mobile app
+- [ ] Telemedicine / video consultations
+- [ ] Insurance integration
 
 ---
 
@@ -1151,6 +408,6 @@ If you find this project useful, please consider giving it a star! ⭐
 
 **Made by Kabir Marzooq**
 
-[⬆ Back to Top](#-a4medicalconsortium-hospital-management-system)
+[⬆ Back to top](#-a4-medical-consortium--hospital-management-system)
 
 </div>

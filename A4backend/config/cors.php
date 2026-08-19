@@ -19,11 +19,18 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => [
-        'https://a4medicalconsortium.com',
-        'http://localhost:5173',
-        'http://localhost:3000'
-    ],
+    // Comma-separated in CORS_ALLOWED_ORIGINS so a real deployment (the
+    // actual Vercel domain, plus wherever the hospital's local frontend
+    // build ends up served from) can be set without editing this file —
+    // defaults to the values this app shipped with if unset, so nothing
+    // breaks for an existing deployment that hasn't set the env var yet.
+    'allowed_origins' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', env(
+            'CORS_ALLOWED_ORIGINS',
+            'https://a4medicalconsortium.com,http://localhost:5173,http://localhost:3000'
+        ))
+    ))),
 
     'allowed_origins_patterns' => [],
 

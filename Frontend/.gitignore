@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-hospital
 dist-ssr
 *.local
 .env

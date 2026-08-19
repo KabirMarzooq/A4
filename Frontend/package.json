@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:hospital": "vite build --mode hospital --outDir dist-hospital",
     "lint": "eslint .",
     "preview": "vite preview"
   },
