@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'role' => \App\Http\Middleware\RoleMiddleware::class,
             'doctor' => \App\Http\Middleware\DoctorMiddleware::class,
+            'sync.key' => \App\Http\Middleware\VerifySyncKey::class,
         ]);
 
     })

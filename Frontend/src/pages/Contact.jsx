@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import toast from "react-hot-toast";
 import api from "../services/api";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { MapPin, MailOpen, Phone, Clock, Send } from "lucide-react";
 
 function Contact() {
   const [formData, setFormData] = useState({
@@ -36,22 +37,22 @@ function Contact() {
 
   const contacts = [
     {
-      iconClass: "fa-solid fa-location-dot px-4",
+      icon: MapPin,
       contact: "Our Location",
       location: "No 6b Jsq Niwa Quarters, Marine Road, Beside Elite Hotel, Adankolo, Lokoja, Kogi State",
     },
     {
-      iconClass: "fa-regular fa-envelope-open",
+      icon: MailOpen,
       contact: "Email Us",
       location: "a4consortium@gmail.com",
     },
     {
-      iconClass: "fa-solid fa-phone",
+      icon: Phone,
       contact: "Call Us",
       location: "0906 476 9973",
     },
     {
-      iconClass: "fa-regular fa-clock",
+      icon: Clock,
       contact: "Working Hours",
       location: "Mon–Sun: 8:00am–5:00pm",
     },
@@ -95,9 +96,10 @@ function Contact() {
                 key={index}
                 className="flex items-center bg-linear-to-r from-cyprus/20 to-teal-800/20 dark:bg-linear-to-r dark:from-gray-900/20 dark:to-gray-800/20 text-cloud-white rounded-xl p-5 my-8 hover:-translate-y-2 hover:brightness-125 transition-all ease-in-out duration-300"
               >
-                <i
-                  className={`text-center p-3 rounded-full bg-teal-600 mr-4 text-2xl ${item.iconClass}`}
-                ></i>
+                <item.icon
+                  size={24}
+                  className="text-cloud-white text-center p-3 rounded-full bg-teal-600 mr-4 box-content"
+                />
                 <div>
                   <p>{item.contact}</p>
                   <small className="text-sm">{item.location}</small>
@@ -128,7 +130,7 @@ function Contact() {
               {icons.map((icons) => (
                 <span key={icons} className="relative inline-block group mr-3 last:mr-0">
                   <i
-                    className={`${icons} text-cloud-white text-center p-3 rounded-full bg-teal-600/50 text-lg cursor-not-allowed opacity-70 transition-all ease-in-out duration-300`}
+                    className={`${icons} text-cloud-white !inline-flex !items-center !justify-center !w-10 !h-10 rounded-full bg-teal-600/50 !text-base !leading-none cursor-not-allowed opacity-70 transition-all ease-in-out duration-300`}
                   ></i>
                   <span className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-gray-900 text-white text-xs px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                     Coming soon
@@ -274,7 +276,10 @@ function Contact() {
             >
               {isSubmitting ? "Sending..." : "Send Message"}{" "}
               {!isSubmitting && (
-                <i className="fa-solid fa-paper-plane group-hover:translate-x-1 transition-all ease-in-out duration-300"></i>
+                <Send
+                  size={16}
+                  className="inline ml-1 group-hover:translate-x-1 transition-all ease-in-out duration-300"
+                />
               )}
             </button>
           </form>

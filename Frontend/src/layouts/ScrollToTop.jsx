@@ -1,6 +1,7 @@
 import { useLocation } from 'react-router-dom';
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { ArrowUp } from "lucide-react";
 
 export function ScrollToTop() {
   const { pathname } = useLocation();
@@ -51,7 +52,7 @@ export function ScrollTop() {
           "
           aria-label="Scroll to top"
         >
-          <i className="fa-solid fa-arrow-up"></i>
+          <ArrowUp size={20} />
         </motion.button>
       )}
     </AnimatePresence>

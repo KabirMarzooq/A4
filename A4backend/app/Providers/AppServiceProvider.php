@@ -13,6 +13,9 @@ use App\Models\PatientFolder;
 use App\Models\Drug;
 use App\Models\Invoice;
 use App\Models\PharmacySale;
+use App\Models\Admission;
+use App\Models\LabOrder;
+use App\Models\SyncedBookingRequest;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
@@ -25,6 +28,9 @@ use App\Observers\PatientFolderObserver;
 use App\Observers\DrugObserver;
 use App\Observers\InvoiceObserver;
 use App\Observers\PharmacySaleObserver;
+use App\Observers\AdmissionObserver;
+use App\Observers\LabOrderObserver;
+use App\Observers\SyncedBookingRequestObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -80,5 +86,8 @@ class AppServiceProvider extends ServiceProvider
         Drug::observe(DrugObserver::class);
         Invoice::observe(InvoiceObserver::class);
         PharmacySale::observe(PharmacySaleObserver::class);
+        Admission::observe(AdmissionObserver::class);
+        LabOrder::observe(LabOrderObserver::class);
+        SyncedBookingRequest::observe(SyncedBookingRequestObserver::class);
     }
 }

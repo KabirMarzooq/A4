@@ -18,6 +18,8 @@ import {
   Monitor,
   Box,
   CalendarDays,
+  RefreshCw,
+  FlaskConical,
 } from "lucide-react";
 import { useTheme } from "../layouts/ThemeContext";
 import api from "../services/api";
@@ -211,36 +213,88 @@ const ROLE_NAV_ITEMS = {
       title: "Manage inventory",
     },
   ],
+  Lab: [
+    {
+      label: "Lab Dashboard",
+      path: "/dashboard/lab",
+      icon: FlaskConical,
+      notificationKey: "lab-orders",
+      title: "Manage lab orders",
+    },
+  ],
   // Add more roles here easily
+};
+
+// Label lookup only — which role a given view can switch to. Actual
+// eligibility to USE the switcher is gated separately below (only a real
+// admin account, never a genuine doctor account, ever sees the control),
+// so this map being bidirectional just lets the button read correctly
+// once already switched into "Doctor" view.
+const ROLE_SWITCH_PAIRS = {
+  Admin: "Doctor",
+  Doctor: "Admin",
 };
 
 export default function DashboardLayout() {
   const [isOpen, setIsOpen] = useState(false);
-  const [user, setUser] = useState(null);
+  // Read synchronously (not via useEffect) so normalizedRole/activeRole are
+  // correct on the very first render — an async load here previously left
+  // activeRole briefly initialized against a not-yet-loaded "Patient"
+  // default, flashing the wrong sidebar for a tick before self-correcting.
+  const [user, setUser] = useState(() => {
+    const savedUser = localStorage.getItem("a4_user");
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
   const location = useLocation();
   const { theme, setTheme } = useTheme();
-
-  useEffect(() => {
-    const savedUser = localStorage.getItem("a4_user");
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
-    }
-  }, []);
+  const [isSwitching, setIsSwitching] = useState(false);
 
   const userRole = user?.role || null;
   const userName = user?.name || "User";
 
+  // The account's real, fixed role (users.role in the database) — this
+  // never changes for the lifetime of the session, unlike activeRole below.
   const normalizedRole = userRole
     ? userRole.charAt(0).toUpperCase() + userRole.slice(1).toLowerCase()
     : "Patient";
 
   const { notifications, clearNotification } = useNotifications(userRole);
 
+  // Which nav set is currently displayed. Only ever differs from
+  // normalizedRole for a real admin account that has switched to "Doctor" —
+  // enforced by the sanitizing effect below, not just by this initializer.
+  const [activeRole, setActiveRole] = useState(
+    () => sessionStorage.getItem("a4_active_role") || normalizedRole
+  );
+
+  useEffect(() => {
+    // Only an admin account may ever have an activeRole other than its own
+    // normalizedRole. Any stale/tampered sessionStorage value for every
+    // other role gets reset here — real enforcement of what data can
+    // actually be fetched still happens server-side (RoleMiddleware) and
+    // at the route-guard layer (ProtectedRoute), this is just UI hygiene.
+    const validRoles =
+      normalizedRole === "Admin" ? ["Admin", "Doctor"] : [normalizedRole];
+    const stored = sessionStorage.getItem("a4_active_role");
+    if (!stored || !validRoles.includes(stored)) {
+      setActiveRole(normalizedRole);
+    }
+  }, [normalizedRole]);
+
   if (!user) return null;
 
-  // Every user has exactly one fixed role (users.role in the database).
-  // If role is not recognized, default to Patient.
-  const navItems = ROLE_NAV_ITEMS[normalizedRole] || ROLE_NAV_ITEMS["Patient"];
+  const navItems = ROLE_NAV_ITEMS[activeRole] || ROLE_NAV_ITEMS["Patient"];
+
+  const handleRoleSwitch = () => {
+    const switchTo = ROLE_SWITCH_PAIRS[activeRole];
+    if (!switchTo) return;
+    setIsSwitching(true);
+    setTimeout(() => {
+      sessionStorage.setItem("a4_active_role", switchTo);
+      setActiveRole(switchTo);
+      setIsSwitching(false);
+    }, 800);
+  };
 
   const handleLogout = async () => {
     try {
@@ -254,6 +308,7 @@ export default function DashboardLayout() {
 
       // Clear local storage
       localStorage.removeItem("a4_token");
+      sessionStorage.removeItem("a4_active_role");
 
       // Redirect to login
       window.location.href = "/login";
@@ -416,15 +471,40 @@ export default function DashboardLayout() {
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col">
           <header className="h-20 px-1 md:px-8 flex items-center justify-between border-b border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-950/50 backdrop-blur-xl sticky top-0 z-20 w-full">
-            {normalizedRole !== "Patient" && (
+            {normalizedRole === "Admin" ? (
               <div className="flex items-center sm:gap-4 gap-1">
                 <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-2xl bg-teal-500/10 border border-teal-500/20">
                   <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
                   <span className="text-xs font-bold text-teal-600 dark:text-teal-400 uppercase tracking-widest">
-                    {normalizedRole} Dashboard
+                    {activeRole} Dashboard
                   </span>
                 </div>
+
+                <button
+                  onClick={handleRoleSwitch}
+                  disabled={isSwitching}
+                  className="flex items-center gap-2 px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-600 dark:text-slate-300 hover:border-teal-400 hover:text-teal-600 transition-all shadow-sm cursor-pointer disabled:opacity-70"
+                >
+                  <RefreshCw
+                    size={14}
+                    className={isSwitching ? "animate-spin" : ""}
+                  />
+                  {isSwitching
+                    ? `Switching to ${ROLE_SWITCH_PAIRS[activeRole]}...`
+                    : `Switch to ${ROLE_SWITCH_PAIRS[activeRole]}`}
+                </button>
               </div>
+            ) : (
+              normalizedRole !== "Patient" && (
+                <div className="flex items-center sm:gap-4 gap-1">
+                  <div className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-2xl bg-teal-500/10 border border-teal-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                    <span className="text-xs font-bold text-teal-600 dark:text-teal-400 uppercase tracking-widest">
+                      {normalizedRole} Dashboard
+                    </span>
+                  </div>
+                </div>
+              )
             )}
 
             <div className="flex items-center gap-6 justify-end">

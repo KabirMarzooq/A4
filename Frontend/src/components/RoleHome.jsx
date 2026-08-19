@@ -13,6 +13,7 @@ export default function RoleHome() {
     admin: "/dashboard/sales-records",
     receptionist: "/dashboard/sales-records",
     pharmacy: "/dashboard/sales-records",
+    lab: "/dashboard/lab",
   };
 
   const targetPath = roleDefaults[role.toLowerCase()] || "/login";

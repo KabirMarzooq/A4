@@ -28,7 +28,7 @@ class AuthController extends Controller
             'email' => 'required|string|email|max:100|unique:users',
             'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()],
             'phone' => 'required|string|max:11',
-            'role' => 'required|in:patient,doctor,receptionist,admin,pharmacy',
+            'role' => 'required|in:patient,doctor,receptionist,admin,pharmacy,lab',
 
             'profile.specialization' => 'nullable|string',
             'adminKey' => 'nullable|string',
@@ -48,7 +48,7 @@ class AuthController extends Controller
         // or staff ID, so they start pending until an admin approves them
         // from the Users tab. Patients and admins (already gated by the
         // admin key above) are approved immediately.
-        $status = in_array($request->role, ['doctor', 'receptionist', 'pharmacy'])
+        $status = in_array($request->role, ['doctor', 'receptionist', 'pharmacy', 'lab'])
             ? 'pending'
             : 'approved';
 

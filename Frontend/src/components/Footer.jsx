@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import React from "react";
 import { Link } from "react-router-dom";
-import logo from "../assets/a4-icon.png";
+import logo from "../assets/a4-logo-full.png";
 
 function Footer() {
   const currentYear = new Date().getFullYear();
@@ -31,12 +31,9 @@ function Footer() {
             >
               <img
                 src={logo}
-                alt="A4 Medical Consortium Logo"
-                className="w-10 h-10 mx-auto"
+                alt="A4 Medical Consortium"
+                className="h-12 w-auto"
               />
-              <p className="italic font-logo text-xl py-0.5">
-                A4 Medical Consortium
-              </p>
             </Link>
 
             <p className="text-cyprus text-sm font-mono mt-5">
@@ -86,7 +83,7 @@ function Footer() {
             {["fa-facebook", "fa-instagram", "fa-x-twitter", "fa-linkedin-in"].map((icon) => (
               <span key={icon} className="relative inline-block group mr-2 last:mr-0">
                 <i
-                  class={`fa-brands ${icon} p-3 text-lg text-gray-400 border-1 border-gray-400 rounded-full cursor-not-allowed opacity-60 transition-all ease-in duration-200`}
+                  className={`fa-brands ${icon} !inline-flex !items-center !justify-center !w-10 !h-10 !text-base !leading-none text-gray-400 border-1 border-gray-400 rounded-full cursor-not-allowed opacity-60 transition-all ease-in duration-200`}
                 ></i>
                 <span className="pointer-events-none absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-gray-900 text-white text-xs px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                   Coming soon
@@ -129,6 +126,15 @@ function Footer() {
             &copy; {currentYear} A4 Medical Consortium Hospital Management
             System. All Rights Reserved.
           </small>
+          <div className="text-sm mt-2">
+            <Link to="/privacy-policy" className="hover:underline">
+              Privacy Policy
+            </Link>
+            <span className="mx-2 opacity-50">&middot;</span>
+            <Link to="/terms-of-service" className="hover:underline">
+              Terms of Service
+            </Link>
+          </div>
         </motion.div>
       </footer>
     </>

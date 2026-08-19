@@ -7,11 +7,12 @@ import api from "../services/api";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import logo from "../assets/a4-icon.png";
+import logoFull from "../assets/a4-logo-full.png";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 // Only admin registration is gated by a real secret (env ADMIN_SECRET).
-// Doctor/receptionist/pharmacy accounts are approved by an admin from the
-// Users tab after registering instead of a self-reported, unverifiable ID.
+// Doctor/receptionist/pharmacy/lab accounts are approved by an admin from
+// the Users tab after registering instead of a self-reported, unverifiable ID.
 const ID_CONFIG = {
   admin: { length: 8, label: "Admin Authorization Key", name: "adminKey" },
 };
@@ -164,10 +165,7 @@ function SignUp() {
 
         <div className="p-8 sm:p-10 max-h-[90vh] overflow-y-auto">
           <Link to="/" className="flex items-center mb-6">
-            <img src={logo} alt="A4 Medical Consortium Logo" className="w-10 h-10" />
-            <span className="text-xl font-semibold font-logo text-cyprus italic">
-              A4 Medical Consortium
-            </span>
+            <img src={logoFull} alt="A4 Medical Consortium" className="h-12 w-auto" />
           </Link>
 
           <h2 className="text-2xl font-bold mb-1">Create account</h2>
@@ -333,6 +331,7 @@ function SignUp() {
                 <option value="doctor">Doctor</option>
                 <option value="pharmacy">Pharmacy</option>
                 <option value="receptionist">Receptionist</option>
+                <option value="lab">Lab</option>
                 <option value="admin">Admin</option>
               </select>
               {errors.role && (
@@ -412,6 +411,42 @@ function SignUp() {
                   </div>
                 )}
               </motion.div>
+            )}
+
+            <div className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                id="consent"
+                {...register("consent", {
+                  required: "You must agree to continue",
+                })}
+                className="mt-1 accent-teal-600 cursor-pointer"
+              />
+              <label htmlFor="consent" className="text-xs text-gray-500">
+                By creating an account, I agree the hospital may use my
+                information to provide and manage my care, and I accept the{" "}
+                <Link
+                  to="/terms-of-service"
+                  target="_blank"
+                  className="text-teal-600 font-semibold hover:underline"
+                >
+                  Terms of Service
+                </Link>{" "}
+                and{" "}
+                <Link
+                  to="/privacy-policy"
+                  target="_blank"
+                  className="text-teal-600 font-semibold hover:underline"
+                >
+                  Privacy Policy
+                </Link>
+                .
+              </label>
+            </div>
+            {errors.consent && (
+              <p className="text-red-500 text-[10px] -mt-2 ml-2">
+                {errors.consent.message}
+              </p>
             )}
 
             <button

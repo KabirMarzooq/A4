@@ -58,6 +58,8 @@ export default function Users() {
         return "bg-amber-500/10 text-amber-500 border-amber-500/20";
       case "receptionist":
         return "bg-rose-500/10 text-rose-500 border-rose-500/20";
+      case "lab":
+        return "bg-cyan-500/10 text-cyan-500 border-cyan-500/20";
       default:
         return "bg-blue-500/10 text-blue-500 border-blue-500/20";
     }
@@ -135,6 +137,7 @@ export default function Users() {
             <option value="patient">Patients</option>
             <option value="receptionist">Receptionist</option>
             <option value="pharmacy">Pharmacy</option>
+            <option value="lab">Lab</option>
           </select>
         </div>
       </div>
@@ -329,7 +332,7 @@ export default function Users() {
           <p className="text-[10px] font-bold text-slate-400 uppercase px-3 py-1">
             Change Role
           </p>
-          {["admin", "doctor", "patient", "receptionist", "pharmacy"].map(
+          {["admin", "doctor", "patient", "receptionist", "pharmacy", "lab"].map(
             (role) => {
               const currentUser = userData.data.find(
                 (u) => u.id === openMenuId

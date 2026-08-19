@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import Visiting from "../assets/visiting.jpeg";
 import Isometric from "../assets/a4-endoscopy-service.png";
 import Cones from "../assets/a4-building.png";
+import Badge from "../assets/a4-logo-badge.png";
 import Counter from "../components/Counter";
 
 function About() {
@@ -109,12 +110,20 @@ function About() {
           viewport={{ once: true }}
           className="sm:w-1/2 w-full flex flex-col gap-5"
         >
-          <img
-            loading="lazy"
-            src={Cones}
-            alt="A4 Medical Consortium hospital building"
-            className="aspect-[3/2] w-full object-cover rounded-2xl shadow-md shadow-gray-200"
-          />
+          <div className="relative">
+            <img
+              loading="lazy"
+              src={Cones}
+              alt="A4 Medical Consortium hospital building"
+              className="aspect-[3/2] w-full object-cover rounded-2xl shadow-md shadow-gray-200"
+            />
+            <img
+              loading="lazy"
+              src={Badge}
+              alt="A4 Medical Consortium"
+              className="hidden sm:block absolute -bottom-6 -right-6 w-28 h-auto drop-shadow-lg bg-white rounded-xl p-2"
+            />
+          </div>
 
           <div className="grid grid-cols-2 gap-4">
             <img

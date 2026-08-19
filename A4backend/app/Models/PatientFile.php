@@ -68,6 +68,20 @@ class PatientFile extends Model
         return $this->hasMany(PatientFileTransfer::class);
     }
 
+    public function admissions()
+    {
+        return $this->hasMany(Admission::class);
+    }
+
+    // The active stay, if any — powers the "Admitted" badge without the
+    // frontend having to filter the full admissions history itself.
+    public function currentAdmission()
+    {
+        return $this->hasOne(Admission::class)
+            ->where('status', 'admitted')
+            ->latestOfMany();
+    }
+
     // Full name helper
     public function getFullNameAttribute(): string
     {

@@ -41,4 +41,13 @@ return [
         'redirect'      => env('GOOGLE_REDIRECT_URI'),
     ],
 
+    // Offline sync — cloud/local server-to-server auth (see
+    // App\Http\Middleware\VerifySyncKey and the sync:* console commands).
+    // cloud_url is only set on the local deployment; the cloud copy never
+    // calls itself, so it stays unset there and sync:run exits quietly.
+    'sync' => [
+        'secret'    => env('SYNC_SECRET'),
+        'cloud_url' => env('SYNC_CLOUD_URL'),
+    ],
+
 ];

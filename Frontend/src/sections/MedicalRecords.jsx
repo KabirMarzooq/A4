@@ -28,6 +28,10 @@ import {
   FlaskConical,
   BadgeDollarSign,
   Pill,
+  Waves,
+  Bed,
+  LogOut,
+  MoreHorizontal,
 } from "lucide-react";
 import api from "../services/api";
 import { toast } from "react-hot-toast";
@@ -376,6 +380,12 @@ function PatientFileView({ fileId, onBack }) {
   const [editingRecord, setEditingRecord] = useState(null);
   const [isEditFileOpen, setIsEditFileOpen] = useState(false);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const [isDialysisFormOpen, setIsDialysisFormOpen] = useState(false);
+  const [editingDialysisRecord, setEditingDialysisRecord] = useState(null);
+  const [isAdmitOpen, setIsAdmitOpen] = useState(false);
+  const [isDischargeOpen, setIsDischargeOpen] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isLabOrderOpen, setIsLabOrderOpen] = useState(false);
 
   const fetchFile = async () => {
     try {
@@ -403,9 +413,20 @@ function PatientFileView({ fileId, onBack }) {
 
   const profile = file;
   const records = file?.visit_records || [];
+  // Dialysis sessions get their own register-style tab instead of the
+  // narrative timeline — kept separate here so both views stay in sync
+  // with a single fetch.
+  const generalRecords = records.filter((r) => r.visit_type !== "dialysis");
+  const dialysisRecords = records.filter((r) => r.visit_type === "dialysis");
 
   const tabs = [
     { id: "overview", label: "Overview", icon: <ClipboardList size={15} /> },
+    {
+      id: "dialysis",
+      label: "Dialysis",
+      icon: <Waves size={15} />,
+      count: dialysisRecords.length,
+    },
     {
       id: "prescriptions",
       label: "Prescriptions",
@@ -460,9 +481,20 @@ function PatientFileView({ fileId, onBack }) {
                   </span>
                 )}
               </p>
+              {file?.current_admission && (
+                <p className="text-xs font-bold mt-1 flex items-center gap-1 text-indigo-600 dark:text-indigo-400">
+                  <Bed size={12} /> Admitted — Ward: {file.current_admission.ward}
+                  {" — Day "}
+                  {Math.floor(
+                    (Date.now() -
+                      new Date(file.current_admission.admission_date).getTime()) /
+                      (1000 * 60 * 60 * 24)
+                  ) + 1}
+                </p>
+              )}
             </div>
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-3 md:ml-auto md:justify-end">
             <button
               onClick={() => setIsTransferOpen(true)}
               className="flex items-center gap-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 px-5 py-3 rounded-2xl font-bold text-sm transition-all active:scale-95 cursor-pointer"
@@ -476,6 +508,66 @@ function PatientFileView({ fileId, onBack }) {
             >
               <Pencil size={16} /> Edit Profile
             </button>
+            <div className="relative">
+              <button
+                onClick={() => setIsMoreMenuOpen((v) => !v)}
+                className="flex items-center gap-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 px-4 py-3 rounded-2xl font-bold text-sm transition-all active:scale-95 cursor-pointer"
+                title="More actions"
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {isMoreMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setIsMoreMenuOpen(false)}
+                  />
+                  <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl z-50 overflow-hidden py-1.5">
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setIsDialysisFormOpen(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
+                    >
+                      <Waves size={15} className="text-blue-500" /> Log
+                      Dialysis Session
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setIsLabOrderOpen(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
+                    >
+                      <FlaskConical size={15} className="text-cyan-500" />{" "}
+                      Order Lab Test
+                    </button>
+                    {file?.current_admission ? (
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setIsDischargeOpen(true);
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
+                      >
+                        <LogOut size={15} /> Discharge
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setIsAdmitOpen(true);
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
+                      >
+                        <Bed size={15} /> Admit Patient
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
             <button
               onClick={() => setIsVisitFormOpen(true)}
               className="flex items-center gap-2 bg-teal-500 hover:bg-teal-600 text-white px-5 py-3 rounded-2xl font-bold text-sm shadow-lg shadow-teal-500/20 transition-all active:scale-95 cursor-pointer"
@@ -664,7 +756,7 @@ function PatientFileView({ fileId, onBack }) {
 
       {activeTab === "overview" && (
         <>
-          {records.length === 0 ? (
+          {generalRecords.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <ClipboardList
                 size={40}
@@ -678,7 +770,7 @@ function PatientFileView({ fileId, onBack }) {
           ) : (
             <div className="relative space-y-0">
               <div className="absolute left-6 top-6 bottom-6 w-px bg-slate-200 dark:bg-slate-700" />
-              {records.map((record) => (
+              {generalRecords.map((record) => (
                 <div key={record.id} className="relative flex gap-6 pb-6">
                   <div className="relative z-10 flex-shrink-0">
                     <div className="w-12 h-12 bg-white dark:bg-slate-800 border-2 border-teal-500 rounded-2xl flex items-center justify-center shadow-sm">
@@ -863,6 +955,15 @@ function PatientFileView({ fileId, onBack }) {
         </>
       )}
 
+      {activeTab === "dialysis" && (
+        <DialysisTab
+          records={dialysisRecords}
+          profile={profile}
+          onAdd={() => setIsDialysisFormOpen(true)}
+          onEdit={(record) => setEditingDialysisRecord(record)}
+        />
+      )}
+
       {activeTab === "prescriptions" && (
         <PrescriptionsTab prescriptions={prescriptions} />
       )}
@@ -889,6 +990,54 @@ function PatientFileView({ fileId, onBack }) {
         onSaved={() => {
           fetchFile();
           setIsTransferOpen(false);
+        }}
+      />
+
+      {/* Dialysis session — log / edit */}
+      <DialysisSessionForm
+        isOpen={isDialysisFormOpen || !!editingDialysisRecord}
+        onClose={() => {
+          setIsDialysisFormOpen(false);
+          setEditingDialysisRecord(null);
+        }}
+        fileId={fileId}
+        patientName={file?.full_name}
+        editingRecord={editingDialysisRecord}
+        onSaved={() => {
+          fetchFile();
+          setIsDialysisFormOpen(false);
+          setEditingDialysisRecord(null);
+        }}
+      />
+
+      {/* Admit / discharge */}
+      <AdmitModal
+        isOpen={isAdmitOpen}
+        onClose={() => setIsAdmitOpen(false)}
+        fileId={fileId}
+        patientName={file?.full_name}
+        onSaved={() => {
+          fetchFile();
+          setIsAdmitOpen(false);
+        }}
+      />
+      <DischargeModal
+        isOpen={isDischargeOpen}
+        onClose={() => setIsDischargeOpen(false)}
+        admissionId={file?.current_admission?.id}
+        patientName={file?.full_name}
+        onSaved={() => {
+          fetchFile();
+          setIsDischargeOpen(false);
+        }}
+      />
+      <OrderLabTestModal
+        isOpen={isLabOrderOpen}
+        onClose={() => setIsLabOrderOpen(false)}
+        fileId={fileId}
+        patientName={file?.full_name}
+        onSaved={() => {
+          setIsLabOrderOpen(false);
         }}
       />
     </div>
@@ -1076,6 +1225,746 @@ function TransferModal({
             {saving ? "Assigning..." : "Assign Doctor"}
           </button>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ── DIALYSIS TAB ──────────────────────────────────────────────────────────────
+// A compact register-style table (not the narrative timeline) so staff
+// coming from the hospital's Excel sheet see something familiar, and so
+// "how many sessions has this patient had" is answered at a glance.
+function DialysisTab({ records, profile, onAdd, onEdit }) {
+  const age = calcAge(profile?.date_of_birth);
+
+  if (records.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
+          <Waves size={28} className="text-slate-300 dark:text-slate-600" />
+        </div>
+        <p className="text-slate-500 font-medium">No dialysis sessions yet</p>
+        <p className="text-slate-400 text-sm mt-1">
+          Click "Log Dialysis Session" to record the first one.
+        </p>
+      </div>
+    );
+  }
+
+  const columns = [
+    "Date",
+    "Doctor",
+    "Session #",
+    "Diagnosis",
+    "Access",
+    "Infection",
+    "Machine",
+    "Pre BP",
+    "Post BP",
+    "Pre Wt(kg)",
+    "Post Wt(kg)",
+    "UF(ml)",
+    "Duration(hrs)",
+    "Complications",
+    "Remarks",
+    "Fee",
+    "",
+  ];
+
+  return (
+    <div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+        <p className="text-sm text-slate-500">
+          Age: <span className="font-bold text-slate-700 dark:text-slate-300">{age ?? "—"}</span>
+          {" · "}Sex:{" "}
+          <span className="font-bold text-slate-700 dark:text-slate-300">
+            {profile?.gender || "—"}
+          </span>
+        </p>
+        <p className="text-sm font-bold text-blue-600 dark:text-blue-400">
+          Total Sessions: {records.length}
+        </p>
+      </div>
+
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl shadow-sm overflow-x-auto">
+        <table className="w-full text-left border-collapse text-sm min-w-[1400px]">
+          <thead>
+            <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50">
+              {columns.map((c) => (
+                <th
+                  key={c}
+                  className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap"
+                >
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {records.map((r) => (
+              <tr
+                key={r.id}
+                className="border-b border-slate-50 dark:border-slate-700/50 last:border-0"
+              >
+                <td className="px-4 py-3 whitespace-nowrap text-slate-700 dark:text-slate-300">
+                  {new Date(r.visit_date).toLocaleDateString()}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">
+                  {r.doctor?.name || "—"}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <span className="text-teal-600 dark:text-teal-400 font-mono font-bold">
+                    {r.session_number ?? "—"}
+                  </span>
+                </td>
+                <td className="px-4 py-3 max-w-[180px] truncate text-slate-700 dark:text-slate-300">
+                  {r.diagnosis || "—"}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{r.access_type || "—"}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">
+                  {r.infection_status || "—"}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{r.machine_no || "—"}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{r.pre_bp || "—"}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{r.post_bp || "—"}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">
+                  {r.pre_weight_kg ?? "—"}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">
+                  {r.post_weight_kg ?? "—"}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">{r.uf_ml ?? "—"}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-slate-500">
+                  {r.duration_hours ?? "—"}
+                </td>
+                <td className="px-4 py-3 max-w-[160px] truncate text-slate-500">
+                  {r.complications || "—"}
+                </td>
+                <td className="px-4 py-3 max-w-[160px] truncate text-slate-500">{r.notes || "—"}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  {r.consultation_fee ? (
+                    <span className="text-green-600 dark:text-green-400 font-bold">
+                      {formatNGN(r.consultation_fee)}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <button
+                    onClick={() => onEdit(r)}
+                    className="p-2 text-slate-400 hover:text-teal-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full cursor-pointer"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── DIALYSIS SESSION FORM ─────────────────────────────────────────────────────
+// A separate component rather than a mode-toggle on VisitRecordForm — that
+// form is already large and general-visit-specific; this keeps each form
+// single-purpose. Posts to the exact same visit-record endpoints with
+// visit_type: "dialysis" — the backend treats it as the same kind of row.
+const EMPTY_DIALYSIS_FORM = {
+  visit_date: new Date().toISOString().split("T")[0],
+  diagnosis: "",
+  access_type: "",
+  infection_status: "",
+  machine_no: "",
+  pre_bp: "",
+  post_bp: "",
+  pre_weight_kg: "",
+  post_weight_kg: "",
+  uf_ml: "",
+  duration_hours: "",
+  complications: "",
+  notes: "",
+  consultation_fee: "",
+};
+
+function DialysisSessionForm({
+  isOpen,
+  onClose,
+  fileId,
+  patientName,
+  editingRecord,
+  onSaved,
+}) {
+  const [form, setForm] = useState(EMPTY_DIALYSIS_FORM);
+  const [saving, setSaving] = useState(false);
+  const set = (f, v) => setForm((p) => ({ ...p, [f]: v }));
+
+  useEffect(() => {
+    if (editingRecord) {
+      setForm({
+        visit_date: editingRecord.visit_date?.split("T")[0] || EMPTY_DIALYSIS_FORM.visit_date,
+        diagnosis: editingRecord.diagnosis || "",
+        access_type: editingRecord.access_type || "",
+        infection_status: editingRecord.infection_status || "",
+        machine_no: editingRecord.machine_no || "",
+        pre_bp: editingRecord.pre_bp || "",
+        post_bp: editingRecord.post_bp || "",
+        pre_weight_kg: editingRecord.pre_weight_kg ?? "",
+        post_weight_kg: editingRecord.post_weight_kg ?? "",
+        uf_ml: editingRecord.uf_ml ?? "",
+        duration_hours: editingRecord.duration_hours ?? "",
+        complications: editingRecord.complications || "",
+        notes: editingRecord.notes || "",
+        consultation_fee: editingRecord.consultation_fee ?? "",
+      });
+    } else if (isOpen) {
+      setForm(EMPTY_DIALYSIS_FORM);
+    }
+  }, [editingRecord, isOpen]);
+
+  const handleSubmit = async () => {
+    setSaving(true);
+    try {
+      if (editingRecord) {
+        await api.patch(`/folders/visits/${editingRecord.id}`, form);
+        toast.success("Dialysis session updated.");
+      } else {
+        const res = await api.post(`/folders/files/${fileId}/visits`, {
+          ...form,
+          visit_type: "dialysis",
+        });
+        const record = res.data?.record;
+        toast.success(
+          record?.session_number
+            ? `Session ${record.session_number} logged.`
+            : "Dialysis session logged."
+        );
+      }
+      onSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to save dialysis session.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white dark:bg-slate-800 rounded-3xl w-full max-w-3xl max-h-[90vh] flex flex-col border border-slate-200 dark:border-slate-700 shadow-2xl z-10">
+        <div className="flex justify-between items-center p-6 border-b border-slate-100 dark:border-slate-700">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Waves size={18} className="text-blue-500" />
+              {editingRecord ? "Edit Dialysis Session" : "Log Dialysis Session"}
+            </h3>
+            <p className="text-slate-500 text-sm mt-0.5">
+              Patient: <span className="font-bold text-teal-600">{patientName}</span>
+              {editingRecord?.session_number && (
+                <>
+                  {" · "}
+                  <span className="font-mono font-bold text-blue-600 dark:text-blue-400">
+                    Session {editingRecord.session_number}
+                  </span>
+                </>
+              )}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField label="Visit Date *">
+              <input
+                type="date"
+                className={inputClass}
+                value={form.visit_date}
+                onChange={(e) => set("visit_date", e.target.value)}
+              />
+            </FormField>
+            <FormField label="Diagnosis">
+              <input
+                type="text"
+                placeholder="e.g. CKD Stage 5"
+                className={inputClass}
+                value={form.diagnosis}
+                onChange={(e) => set("diagnosis", e.target.value)}
+              />
+            </FormField>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <FormField label="Access Type">
+              <select
+                className={inputClass}
+                value={form.access_type}
+                onChange={(e) => set("access_type", e.target.value)}
+              >
+                <option value="">Select</option>
+                <option value="AV Fistula">AV Fistula</option>
+                <option value="Central Venous Catheter">Central Venous Catheter</option>
+                <option value="Graft">Graft</option>
+                <option value="Other">Other</option>
+              </select>
+            </FormField>
+            <FormField label="Infection Status">
+              <select
+                className={inputClass}
+                value={form.infection_status}
+                onChange={(e) => set("infection_status", e.target.value)}
+              >
+                <option value="">Select</option>
+                <option value="None">None</option>
+                <option value="Suspected">Suspected</option>
+                <option value="Confirmed">Confirmed</option>
+              </select>
+            </FormField>
+            <FormField label="Machine No.">
+              <input
+                type="text"
+                placeholder="e.g. M-01"
+                className={inputClass}
+                value={form.machine_no}
+                onChange={(e) => set("machine_no", e.target.value)}
+              />
+            </FormField>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <FormField label="Pre BP">
+              <input
+                type="text"
+                placeholder="120/80"
+                className={inputClass}
+                value={form.pre_bp}
+                onChange={(e) => set("pre_bp", e.target.value)}
+              />
+            </FormField>
+            <FormField label="Post BP">
+              <input
+                type="text"
+                placeholder="120/80"
+                className={inputClass}
+                value={form.post_bp}
+                onChange={(e) => set("post_bp", e.target.value)}
+              />
+            </FormField>
+            <FormField label="Pre Weight (kg)">
+              <input
+                type="number"
+                step="0.1"
+                className={inputClass}
+                value={form.pre_weight_kg}
+                onChange={(e) => set("pre_weight_kg", e.target.value)}
+              />
+            </FormField>
+            <FormField label="Post Weight (kg)">
+              <input
+                type="number"
+                step="0.1"
+                className={inputClass}
+                value={form.post_weight_kg}
+                onChange={(e) => set("post_weight_kg", e.target.value)}
+              />
+            </FormField>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <FormField label="UF (ml)">
+              <input
+                type="number"
+                className={inputClass}
+                value={form.uf_ml}
+                onChange={(e) => set("uf_ml", e.target.value)}
+              />
+            </FormField>
+            <FormField label="Duration (hrs)">
+              <input
+                type="number"
+                step="0.1"
+                className={inputClass}
+                value={form.duration_hours}
+                onChange={(e) => set("duration_hours", e.target.value)}
+              />
+            </FormField>
+          </div>
+
+          <FormField label="Complications">
+            <textarea
+              rows={2}
+              className={`${inputClass} resize-none`}
+              value={form.complications}
+              onChange={(e) => set("complications", e.target.value)}
+            />
+          </FormField>
+
+          <FormField label="Remarks">
+            <textarea
+              rows={2}
+              className={`${inputClass} resize-none`}
+              value={form.notes}
+              onChange={(e) => set("notes", e.target.value)}
+            />
+          </FormField>
+
+          <div className="bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 rounded-2xl p-4">
+            <FormField label="Hospital Bill (₦) — leave blank if not billing now">
+              <input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                className={inputClass}
+                value={form.consultation_fee}
+                onChange={(e) => set("consultation_fee", e.target.value)}
+              />
+            </FormField>
+            <p className="text-xs text-green-700 dark:text-green-400 mt-2">
+              Entering a fee will automatically generate an invoice that appears in reception for
+              payment.
+            </p>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-slate-100 dark:border-slate-700">
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            className="w-full py-3.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-60 text-white font-bold rounded-2xl transition-all cursor-pointer"
+          >
+            {saving ? "Saving..." : editingRecord ? "Save Changes" : "Log Session"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ADMIT PATIENT MODAL ───────────────────────────────────────────────────────
+function AdmitModal({ isOpen, onClose, fileId, patientName, onSaved }) {
+  const [form, setForm] = useState({
+    ward: "",
+    reason_for_admission: "",
+    admission_date: new Date().toISOString().split("T")[0],
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (f, v) => setForm((p) => ({ ...p, [f]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.ward) return toast.error("Ward is required.");
+    setSaving(true);
+    try {
+      await api.post(`/folders/files/${fileId}/admissions`, form);
+      toast.success("Patient admitted.");
+      setForm({
+        ward: "",
+        reason_for_admission: "",
+        admission_date: new Date().toISOString().split("T")[0],
+      });
+      onSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to admit patient.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-md border border-slate-200 dark:border-slate-700 shadow-2xl z-10">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Bed size={18} className="text-indigo-500" /> Admit Patient
+            </h3>
+            <p className="text-slate-500 text-sm mt-0.5">
+              Patient: <span className="font-bold text-teal-600">{patientName}</span>
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <FormField label="Ward *">
+            <input
+              type="text"
+              placeholder="e.g. General Ward, Maternity"
+              className={inputClass}
+              value={form.ward}
+              onChange={(e) => set("ward", e.target.value)}
+            />
+          </FormField>
+          <FormField label="Admission Date">
+            <input
+              type="date"
+              className={inputClass}
+              value={form.admission_date}
+              onChange={(e) => set("admission_date", e.target.value)}
+            />
+          </FormField>
+          <FormField label="Reason for Admission">
+            <textarea
+              rows={3}
+              placeholder="Why is this patient being admitted?"
+              className={`${inputClass} resize-none`}
+              value={form.reason_for_admission}
+              onChange={(e) => set("reason_for_admission", e.target.value)}
+            />
+          </FormField>
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full py-3.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 text-white font-bold rounded-2xl transition-all cursor-pointer"
+          >
+            {saving ? "Admitting..." : "Admit Patient"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── DISCHARGE MODAL ───────────────────────────────────────────────────────────
+function DischargeModal({ isOpen, onClose, admissionId, patientName, onSaved }) {
+  const [form, setForm] = useState({
+    discharge_date: new Date().toISOString().split("T")[0],
+    discharge_diagnosis: "",
+    discharge_summary: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const set = (f, v) => setForm((p) => ({ ...p, [f]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.patch(`/folders/admissions/${admissionId}/discharge`, form);
+      toast.success("Patient discharged.");
+      onSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to discharge patient.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-md border border-slate-200 dark:border-slate-700 shadow-2xl z-10">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <LogOut size={18} className="text-slate-500" /> Discharge Patient
+            </h3>
+            <p className="text-slate-500 text-sm mt-0.5">
+              Patient: <span className="font-bold text-teal-600">{patientName}</span>
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <FormField label="Discharge Date">
+            <input
+              type="date"
+              className={inputClass}
+              value={form.discharge_date}
+              onChange={(e) => set("discharge_date", e.target.value)}
+            />
+          </FormField>
+          <FormField label="Discharge Diagnosis">
+            <input
+              type="text"
+              placeholder="Final diagnosis"
+              className={inputClass}
+              value={form.discharge_diagnosis}
+              onChange={(e) => set("discharge_diagnosis", e.target.value)}
+            />
+          </FormField>
+          <FormField label="Discharge Summary">
+            <textarea
+              rows={3}
+              placeholder="Summary of stay and follow-up instructions"
+              className={`${inputClass} resize-none`}
+              value={form.discharge_summary}
+              onChange={(e) => set("discharge_summary", e.target.value)}
+            />
+          </FormField>
+          <div className="bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 rounded-xl px-4 py-3 text-xs text-amber-700 dark:text-amber-400">
+            Any billed visits during this stay are already in Bills &amp; Receipts as usual —
+            nothing extra to reconcile here.
+          </div>
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full py-3.5 bg-slate-700 hover:bg-slate-800 disabled:opacity-60 text-white font-bold rounded-2xl transition-all cursor-pointer"
+          >
+            {saving ? "Discharging..." : "Confirm Discharge"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── ORDER LAB TEST MODAL ──────────────────────────────────────────────────────
+function OrderLabTestModal({ isOpen, onClose, fileId, patientName, onSaved }) {
+  const [testCatalog, setTestCatalog] = useState([]);
+  const [lines, setLines] = useState([
+    { lab_test_id: "", test_name: "", price: "" },
+  ]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setLines([{ lab_test_id: "", test_name: "", price: "" }]);
+      return;
+    }
+    api.get("/lab-tests").then((res) => setTestCatalog(res.data || []));
+  }, [isOpen]);
+
+  const selectTestForLine = (i, testId) => {
+    const test = testCatalog.find((t) => String(t.id) === String(testId));
+    setLines((prev) => {
+      const next = [...prev];
+      next[i] = {
+        lab_test_id: testId,
+        test_name: test?.name || "",
+        price: test?.price || "",
+      };
+      return next;
+    });
+  };
+
+  const handleSubmit = async () => {
+    const validLines = lines.filter((l) => l.test_name && l.price);
+    if (validLines.length === 0) return toast.error("Add at least one test.");
+    setSaving(true);
+    try {
+      await api.post(`/lab-orders/files/${fileId}`, {
+        tests: validLines,
+        is_doctor_order: true,
+      });
+      toast.success(
+        `${validLines.length} test(s) ordered — sent to the Lab dashboard.`
+      );
+      onSaved();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to order test(s).");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="relative bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-md border border-slate-200 dark:border-slate-700 shadow-2xl z-10">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <FlaskConical size={18} className="text-cyan-500" /> Order Lab
+              Test
+            </h3>
+            <p className="text-slate-500 text-sm mt-0.5">
+              Patient: <span className="font-bold text-teal-600">{patientName}</span>
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+          Tests
+        </p>
+        <div className="space-y-3 mb-4">
+          {lines.map((line, i) => (
+            <div key={i} className="flex gap-2">
+              <select
+                className={`${inputClass} flex-1`}
+                value={line.lab_test_id}
+                onChange={(e) => selectTestForLine(i, e.target.value)}
+              >
+                <option value="">Select a test...</option>
+                {testCatalog.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} — ₦{Number(t.price).toLocaleString()}
+                  </option>
+                ))}
+              </select>
+              {lines.length > 1 && (
+                <button
+                  onClick={() =>
+                    setLines((prev) => prev.filter((_, idx) => idx !== i))
+                  }
+                  className="p-3 text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {testCatalog.length === 0 && (
+          <p className="text-xs text-slate-400 mb-4">
+            No tests in the catalog yet — ask an admin or lab staff to add
+            some from the Lab dashboard.
+          </p>
+        )}
+
+        <button
+          onClick={() =>
+            setLines((prev) => [
+              ...prev,
+              { lab_test_id: "", test_name: "", price: "" },
+            ])
+          }
+          className="flex items-center gap-1 text-teal-600 text-xs font-bold mb-5 cursor-pointer"
+        >
+          <Plus size={14} /> Add another test
+        </button>
+
+        <button
+          onClick={handleSubmit}
+          disabled={saving}
+          className="w-full py-3.5 bg-teal-500 hover:bg-teal-600 disabled:opacity-60 text-white font-bold rounded-2xl transition-all cursor-pointer"
+        >
+          {saving ? "Ordering..." : "Order Test(s)"}
+        </button>
       </div>
     </div>
   );

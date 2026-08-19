@@ -7,6 +7,7 @@ import api from "../services/api";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import logo from "../assets/a4-icon.png";
+import logoFull from "../assets/a4-logo-full.png";
 import google from "../assets/google.png";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 
@@ -93,10 +94,7 @@ function LogIn() {
       >
         <div className="p-8 sm:p-10 flex flex-col justify-center">
           <Link to="/" className="flex items-center mb-8">
-            <img src={logo} alt="A4 Medical Consortium Logo" className="w-10 h-10" />
-            <span className="text-xl font-semibold font-logo text-cyprus italic">
-              A4 Medical Consortium
-            </span>
+            <img src={logoFull} alt="A4 Medical Consortium" className="h-12 w-auto" />
           </Link>
 
           <h2 className="text-2xl font-bold mb-1">Welcome back</h2>

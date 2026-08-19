@@ -6,6 +6,16 @@ import {
   EmergencyCards,
   ScheduleCards,
 } from "../components/Cards.jsx";
+import {
+  Stethoscope,
+  Syringe,
+  Baby,
+  Hand,
+  Microscope,
+  Venus,
+  TestTube,
+  Ambulance,
+} from "lucide-react";
 
 function Services() {
   const [activeTab, setActiveTab] = useState("Primary Care");
@@ -15,7 +25,7 @@ function Services() {
   const cards = [
     {
       category: "Primary Care",
-      iconClass: "fa-solid fa-stethoscope",
+      icon: Stethoscope,
       features: "General Consultation",
       description:
         "Our general consultation services serve as your primary contact for all health-related concerns.",
@@ -27,7 +37,7 @@ function Services() {
     },
     {
       category: "Primary Care",
-      iconClass: "fa-solid fa-syringe",
+      icon: Syringe,
       features: "Vaccination Services",
       description:
         "We provide vaccination services to protect you and your family from preventable diseases.",
@@ -35,7 +45,7 @@ function Services() {
     },
     {
       category: "Primary Care",
-      iconClass: "fa-solid fa-baby",
+      icon: Baby,
       features: "Maternal Health",
       description:
         "We are dedicated to ensuring the health, safety, and comfort of mothers and their babies.",
@@ -43,7 +53,7 @@ function Services() {
     },
     {
       category: "Primary Care",
-      iconClass: "fa-solid fa-user-doctor",
+      icon: Stethoscope,
       features: "Family Medicine",
       description:
         "Our family medicine provides care to patients of all ages, genders, and health conditions.",
@@ -55,7 +65,7 @@ function Services() {
     },
     {
       category: "Speciality Care",
-      iconClass: "fa-solid fa-hand-dots",
+      icon: Hand,
       features: "Dermatology",
       description:
         "Evaluation and treatment for common conditions like acne, eczema, and dermatitis.",
@@ -67,7 +77,7 @@ function Services() {
     },
     {
       category: "Speciality Care",
-      iconClass: "fa-solid fa-viruses",
+      icon: Microscope,
       features: "Pathology",
       description:
         "Our pathology department ensures precise and rapid analysis of clinical specimens.",
@@ -75,7 +85,7 @@ function Services() {
     },
     {
       category: "Speciality Care",
-      iconClass: "fa-solid fa-person-pregnant",
+      icon: Venus,
       features: "Gynaecology",
       description:
         "We provide compassionate, specialized care tailored to women at every stage of life.",
@@ -83,7 +93,7 @@ function Services() {
     },
     {
       category: "Diagnostics",
-      iconClass: "fa-solid fa-vial",
+      icon: TestTube,
       features: "Laboratory Testing",
       description:
         "Fast, on-site laboratory testing paired with immediate treatment plans.",
@@ -93,7 +103,7 @@ function Services() {
 
   const emergencyCards = [
     {
-      iconClass: "fa-solid fa-truck-medical",
+      icon: Ambulance,
       features: "24/7 Emergency Care",
       description:
         "24/7 medical care, offering round-the-clock access to doctors and home health services. We are dedicated to ensuring that health management is always within your reach.",
@@ -144,7 +154,7 @@ function Services() {
                 key={index}
                 features={item.features}
                 description={item.description}
-                iconClass={item.iconClass}
+                icon={item.icon}
                 items={item.items}
               />
             ))}
@@ -157,7 +167,7 @@ function Services() {
                 features={card.features}
                 description={card.description}
                 items={card.items}
-                iconClass={card.iconClass}
+                icon={card.icon}
               />
             ))}
           </div>

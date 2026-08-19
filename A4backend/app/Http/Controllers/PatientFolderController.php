@@ -159,6 +159,7 @@ class PatientFolderController extends Controller
         $file = PatientFile::with([
             'folder:id,folder_name,card_number,phone,address',
             'currentDoctor:id,name,specialization',
+            'currentAdmission',
             'visitRecords' => fn($q) =>
             $q->with('doctor:id,name,specialization,role')
                 ->orderBy('visit_date', 'desc'),
@@ -328,7 +329,9 @@ class PatientFolderController extends Controller
 
         $request->validate([
             'visit_date'           => 'required|date',
-            'chief_complaint'      => 'required|string|max:255',
+            // The dialysis register has no "chief complaint" concept, so it's
+            // only required for general visits.
+            'chief_complaint'      => 'required_if:visit_type,general|nullable|string|max:255',
             'physical_examination' => 'nullable|string',
             'investigation'        => 'nullable|string',
             'test_results'         => 'nullable|string',
@@ -340,9 +343,29 @@ class PatientFolderController extends Controller
             'notes'                => 'nullable|string',
             'action_taken'         => 'nullable|string|max:255',
             'consultation_fee'     => 'nullable|numeric|min:0',
+            'visit_type'           => 'nullable|in:general,dialysis',
+            'admission_id'         => 'nullable|exists:admissions,id',
+            'access_type'          => 'nullable|string|max:100',
+            'infection_status'     => 'nullable|string|max:100',
+            'machine_no'           => 'nullable|string|max:50',
+            'pre_bp'               => 'nullable|string|max:20',
+            'post_bp'              => 'nullable|string|max:20',
+            'pre_weight_kg'        => 'nullable|numeric|min:0',
+            'post_weight_kg'       => 'nullable|numeric|min:0',
+            'uf_ml'                => 'nullable|integer|min:0',
+            'duration_hours'       => 'nullable|numeric|between:0,24',
+            'complications'        => 'nullable|string',
         ]);
 
         return DB::transaction(function () use ($request, $file, $fileId) {
+            $visitType = $request->input('visit_type', 'general');
+
+            // Session numbers are always computed server-side, never taken
+            // from the client — same spirit as card_number/invoice_number.
+            $sessionNumber = $visitType === 'dialysis'
+                ? VisitRecord::nextDialysisSessionNumber($fileId)
+                : null;
+
             // Create the visit record
             $record = VisitRecord::create([
                 ...$request->only([
@@ -359,9 +382,25 @@ class PatientFolderController extends Controller
                     'notes',
                     'action_taken',
                     'consultation_fee',
+                    'access_type',
+                    'infection_status',
+                    'machine_no',
+                    'pre_bp',
+                    'post_bp',
+                    'pre_weight_kg',
+                    'post_weight_kg',
+                    'uf_ml',
+                    'duration_hours',
+                    'complications',
                 ]),
                 'patient_file_id' => $fileId,
                 'doctor_id'       => Auth::id(),
+                'visit_type'      => $visitType,
+                'session_number'  => $sessionNumber,
+                // Auto-tag to the patient's active admission (if any) unless
+                // the caller explicitly specified one — lets a normal round
+                // note during a stay link up with zero extra doctor effort.
+                'admission_id'    => $request->input('admission_id') ?? $file->currentAdmission?->id,
             ]);
 
             // If consultation fee provided — generate invoice
@@ -431,8 +470,21 @@ class PatientFolderController extends Controller
             'notes'                => 'nullable|string',
             'action_taken'         => 'nullable|string|max:255',
             'consultation_fee'     => 'nullable|numeric|min:0',
+            'access_type'          => 'nullable|string|max:100',
+            'infection_status'     => 'nullable|string|max:100',
+            'machine_no'           => 'nullable|string|max:50',
+            'pre_bp'               => 'nullable|string|max:20',
+            'post_bp'              => 'nullable|string|max:20',
+            'pre_weight_kg'        => 'nullable|numeric|min:0',
+            'post_weight_kg'       => 'nullable|numeric|min:0',
+            'uf_ml'                => 'nullable|integer|min:0',
+            'duration_hours'       => 'nullable|numeric|between:0,24',
+            'complications'        => 'nullable|string',
         ]);
 
+        // visit_type/session_number are set once at creation and never
+        // change on edit — same as card_number/invoice_number never being
+        // regenerated on update.
         return DB::transaction(function () use ($request, $record) {
             $record->update($request->only([
                 'chief_complaint',
@@ -447,6 +499,16 @@ class PatientFolderController extends Controller
                 'notes',
                 'action_taken',
                 'consultation_fee',
+                'access_type',
+                'infection_status',
+                'machine_no',
+                'pre_bp',
+                'post_bp',
+                'pre_weight_kg',
+                'post_weight_kg',
+                'uf_ml',
+                'duration_hours',
+                'complications',
             ]));
 
             $invoice     = null;

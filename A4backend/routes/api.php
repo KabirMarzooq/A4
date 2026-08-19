@@ -20,6 +20,11 @@ use App\Http\Controllers\DrugController;
 use App\Http\Controllers\SocialAuthController;
 use App\Http\Controllers\PharmacySaleController;
 use App\Http\Controllers\PatientFolderController;
+use App\Http\Controllers\AdmissionController;
+use App\Http\Controllers\LabTestController;
+use App\Http\Controllers\LabOrderController;
+use App\Http\Controllers\SyncController;
+use App\Http\Controllers\SyncedBookingRequestController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\IssueReportController;
@@ -43,6 +48,14 @@ Route::get('/auth/google/redirect', [SocialAuthController::class, 'redirectToGoo
 Route::get('/auth/google/callback', [SocialAuthController::class, 'handleGoogleCallback']);
 
 Route::post('/webhook/paystack', [PaystackController::class, 'webhook']);
+
+// Offline sync — cloud side. Machine-to-machine only (the local server's
+// sync:pull/sync:push commands), no logged-in user, protected by the
+// shared-secret sync.key middleware instead of auth:api.
+Route::middleware('sync.key')->prefix('sync')->group(function () {
+    Route::get('/pending-appointments', [SyncController::class, 'pendingAppointments']);
+    Route::post('/status-update', [SyncController::class, 'receiveStatusUpdate']);
+});
 
 Route::post('/contact', [ContactController::class, 'send'])->middleware('throttle:contact-form');
 
@@ -80,8 +93,10 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/report-issue', [IssueReportController::class, 'store']);
 });
 
-// Doctor Protected Routes
-Route::middleware(['auth:api', 'role:doctor'])->prefix('doctor')->group(function () {
+// Doctor Protected Routes — admin included so the admin account can use the
+// dashboard's "Switch to Doctor" role switcher (see Dashboard.jsx); this does
+// NOT grant ordinary doctor accounts any admin access, only the reverse.
+Route::middleware(['auth:api', 'role:doctor,admin'])->prefix('doctor')->group(function () {
 
     Route::get('/appointments', [AppointmentController::class, 'doctorAppointments']);
 
@@ -175,22 +190,30 @@ Route::middleware(['auth:api', 'role:pharmacy,admin,doctor'])->prefix('pharmacy'
     Route::delete('/drugs/{id}', [DrugController::class, 'destroy']);
 });
 
-// Patient folders/files/visit records — clinical documentation, so pharmacy
-// is deliberately excluded (they only need drug/prescription data, covered
-// by the routes above).
-Route::middleware(['auth:api', 'role:doctor,receptionist,admin'])->prefix('folders')->group(function () {
- 
-    // ── FOLDERS ──────────────────────────────────────────────────────────────
+// Read-only patient lookup — doctor/receptionist/admin AND lab (lab staff
+// need to find the right patient to attach an order to, nothing more; kept
+// as its own group, not merged into the mutating group below, so the two
+// role lists never collide on the same URI).
+Route::middleware(['auth:api', 'role:doctor,receptionist,admin,lab'])->prefix('folders')->group(function () {
     Route::get('/', [PatientFolderController::class, 'indexFolders']);
-    Route::post('/', [PatientFolderController::class, 'storeFolder']);
     Route::get('/{id}', [PatientFolderController::class, 'showFolder']);
+    Route::get('/files/{fileId}', [PatientFolderController::class, 'showFile']);
+});
+
+// Patient folders/files/visit records — clinical documentation, so pharmacy
+// AND lab are deliberately excluded from every mutating endpoint here (lab
+// gets read-only access above only; pharmacy only needs drug/prescription
+// data, covered by the routes above).
+Route::middleware(['auth:api', 'role:doctor,receptionist,admin'])->prefix('folders')->group(function () {
+
+    // ── FOLDERS ──────────────────────────────────────────────────────────────
+    Route::post('/', [PatientFolderController::class, 'storeFolder']);
     Route::patch('/{id}', [PatientFolderController::class, 'updateFolder']);
- 
+
     // ── FILES ─────────────────────────────────────────────────────────────────
     Route::post('/{folderId}/files', [PatientFolderController::class, 'storeFile']);
-    Route::get('/files/{fileId}', [PatientFolderController::class, 'showFile']);
     Route::patch('/files/{fileId}', [PatientFolderController::class, 'updateFile']);
- 
+
     // ── VISIT RECORDS ─────────────────────────────────────────────────────────
     Route::post('/files/{fileId}/visits', [PatientFolderController::class, 'storeVisitRecord']);
     Route::patch('/visits/{recordId}', [PatientFolderController::class, 'updateVisitRecord']);
@@ -199,4 +222,39 @@ Route::middleware(['auth:api', 'role:doctor,receptionist,admin'])->prefix('folde
     // ── TRANSFERS ────────────────────────────────────────────────────────────
     Route::post('/files/{fileId}/transfer', [PatientFolderController::class, 'transferFile']);
     Route::get('/transfers/mine', [PatientFolderController::class, 'transfersToMe']);
+
+    // ── ADMISSIONS ───────────────────────────────────────────────────────────
+    Route::post('/files/{fileId}/admissions', [AdmissionController::class, 'admit']);
+    Route::get('/files/{fileId}/admissions', [AdmissionController::class, 'indexForFile']);
+    Route::patch('/admissions/{admissionId}/discharge', [AdmissionController::class, 'discharge']);
+});
+
+// Lab tests — doctors order, lab staff fulfil, admin oversees.
+Route::middleware(['auth:api', 'role:doctor,lab,admin'])->group(function () {
+    Route::prefix('lab-tests')->group(function () {
+        Route::get('/', [LabTestController::class, 'index']);
+        Route::post('/', [LabTestController::class, 'store']);
+        Route::patch('/{id}', [LabTestController::class, 'update']);
+        Route::delete('/{id}', [LabTestController::class, 'destroy']);
+    });
+
+    Route::prefix('lab-orders')->group(function () {
+        Route::get('/', [LabOrderController::class, 'index']);
+        Route::get('/history', [LabOrderController::class, 'history']);
+        Route::get('/patient/{fileId}', [LabOrderController::class, 'patientOrders']);
+        Route::post('/files/{fileId}', [LabOrderController::class, 'store']);
+        Route::get('/{id}', [LabOrderController::class, 'show']);
+        Route::patch('/{id}/in-progress', [LabOrderController::class, 'markInProgress']);
+        Route::post('/{id}/result', [LabOrderController::class, 'uploadResult']);
+        Route::post('/{id}/send', [LabOrderController::class, 'sendResult']);
+    });
+});
+
+// Offline sync — local side. Receptionist/admin reviewing and acting on the
+// incoming online-booking queue pulled down from the cloud server. Matches
+// the role scope of the existing "Schedules" page (/schedules below).
+Route::middleware(['auth:api', 'role:receptionist,admin'])->prefix('sync-requests')->group(function () {
+    Route::get('/', [SyncedBookingRequestController::class, 'index']);
+    Route::patch('/{id}/confirm', [SyncedBookingRequestController::class, 'confirm']);
+    Route::patch('/{id}/decline', [SyncedBookingRequestController::class, 'decline']);
 });

@@ -2,6 +2,21 @@ import { Button, ButtonB, ButtonC } from "../components/Button.jsx";
 import { motion } from "framer-motion";
 import Hospital from "../assets/a4-building.png";
 import { FeaturedCards, ServicesCards } from "../components/Cards.jsx";
+import {
+  Hand,
+  Venus,
+  Pill,
+  Clock,
+  Phone,
+  HeartPulse,
+  Star,
+  TestTube,
+  Stethoscope,
+  Hospital as HospitalIcon,
+  CalendarCheck,
+  TriangleAlert,
+  CheckCircle2,
+} from "lucide-react";
 
 const parentVariant = {
   hidden: { opacity: 0, y: 50 },
@@ -25,17 +40,17 @@ const childVariant = {
 function Home() {
   const services = [
     {
-      icon: "fa-solid fa-hand-dots",
+      icon: Hand,
       title: "Dermatology",
       text: "We offer diagnosis and treatment of various skin, hair, and nail conditions.",
     },
     {
-      icon: "fa-solid fa-person-pregnant",
+      icon: Venus,
       title: "Gynaecology",
       text: "Comprehensive pregnancy care, scanning and delivery.",
     },
     {
-      icon: "fa-solid fa-capsules",
+      icon: Pill,
       title: "Diagnostics",
       text: "We offer laboratory testing, and specialized screenings for optimal patient care.",
     },
@@ -142,7 +157,7 @@ function Home() {
                 className="flex flex-col sm:flex-row gap-6"
               >
                 <div className="flex items-center">
-                  <i class="fa-solid fa-clock text-teal-800 text-3xl p-1"></i>
+                  <Clock size={30} className="text-teal-800 p-1" />
                   <div className="mx-2">
                     <p className="text-violet-200 text-sm">Working Hours:</p>
                     <p className="text-lg text-cloud-white font-bold">
@@ -152,7 +167,7 @@ function Home() {
                 </div>
 
                 <div className="flex items-center">
-                  <i class="fa-solid fa-phone text-teal-800 text-3xl p-1"></i>
+                  <Phone size={30} className="text-teal-800 p-1" />
                   <div className="mx-2">
                     <p className="text-violet-200 text-sm">Emergency Line:</p>
                     <p className="text-lg text-cloud-white font-bold">
@@ -183,9 +198,10 @@ function Home() {
           {services.map((item, index) => (
             <motion.div key={index} variants={childVariant} className="flex">
               <div className="mt-3">
-                <i
-                  className={`${item.icon} bg-cyprus text-3xl p-3 text-teal-600 rounded-xl`}
-                ></i>
+                <item.icon
+                  size={24}
+                  className="bg-cyprus p-3 text-teal-600 rounded-xl box-content"
+                />
               </div>
 
               <div className="mx-2">
@@ -270,7 +286,7 @@ function Home() {
                     viewport={{ once: true }}
                     className="p-4 inset-shadow-2xs shadow-sm rounded-xl dark:shadow-gray-900 dark:inset-shadow-gray-900 hover:-translate-y-2 transition-all ease-out duration-300 hover:shadow-md"
                   >
-                    <i className="fa-solid fa-heart-pulse text-3xl text-cyprus dark:text-teal-700"></i>
+                    <HeartPulse size={30} className="text-cyprus dark:text-teal-700" />
 
                     <p className="text-cyprus leading-12 font-semibold dark:text-teal-700">
                       Compassionate Care
@@ -293,7 +309,7 @@ function Home() {
                     viewport={{ once: true }}
                     className="p-4 inset-shadow-2xs shadow-sm rounded-xl dark:shadow-gray-900 dark:inset-shadow-gray-900 hover:-translate-y-2 transition-all ease-out duration-300 hover:shadow-md"
                   >
-                    <i className="fa-regular fa-star text-3xl text-cyprus dark:text-teal-700"></i>
+                    <Star size={30} className="text-cyprus dark:text-teal-700" />
 
                     <p className="text-cyprus leading-12 font-semibold dark:text-teal-700">
                       Medical Excellence
@@ -368,7 +384,7 @@ function Home() {
             className="grid grid-cols-1 sm:grid-cols-2 gap-7 mt-20 mb-7"
           >
             <FeaturedCards
-              iconClass="fa-solid fa-vial"
+              icon={TestTube}
               features="Laboratory & Diagnostics"
               description="Our clinic handles a wide range of diagnostic 
               and essential medical screenings. Rapid testing for Malaria,
@@ -381,7 +397,7 @@ function Home() {
             />
 
             <FeaturedCards
-              iconClass="fa-solid fa-user-doctor"
+              icon={Stethoscope}
               features="Medical Consultations"
               description="We provide prompt, professional medical attention
                tailored to your specific health needs."
@@ -399,7 +415,7 @@ function Home() {
             className="grid grid-cols-1 sm:grid-cols-2 gap-7 mb-20"
           >
             <FeaturedCards
-              iconClass="fa-solid fa-hospital-user"
+              icon={HospitalIcon}
               features="Patient Support Services"
               description="We are dedicated to ensuring that critical care
                and health management are always within your reach, so you
@@ -480,7 +496,7 @@ function Home() {
             className="grid grid-cols-1 sm:grid-cols-3 gap-7"
           >
             <ServicesCards
-              iconClass="fa-solid fa-heart-pulse"
+              icon={HeartPulse}
               title="24/7 Emergency Care"
               description="24/7 medical care, offering round-the-clock access to doctors and home health services."
               to="/services"
@@ -488,7 +504,7 @@ function Home() {
             />
 
             <ServicesCards
-              iconClass="fa-regular fa-calendar-check"
+              icon={CalendarCheck}
               title="Easy Online Booking"
               description="The system allows for 24/7 scheduling, reminders to reduce no-shows, and secure online payments."
               to="/login"
@@ -496,7 +512,7 @@ function Home() {
             />
 
             <ServicesCards
-              iconClass="fa-solid fa-user-doctor"
+              icon={Stethoscope}
               title="Expert Medical Team"
               description="Consult with experienced medical specialists for comprehensive health evaluations and express medical care."
               to="/about"
@@ -532,7 +548,10 @@ function Home() {
               viewport={{ once: true }}
               className="flex items-center"
             >
-              <i class="fa-solid fa-phone text-cloud-white bg-teal-700/75 text-3xl p-4 mx-3 rounded-full"></i>
+              <Phone
+                size={30}
+                className="text-cloud-white bg-teal-700/75 p-4 mx-3 rounded-full box-content"
+              />
               <div className="mx-2">
                 <p className="text-2xl text-cloud-white font-medium">
                   Medical Emergency?
@@ -559,7 +578,7 @@ function Home() {
                 href="tel:+2349064769973"
                 className="inline-block bg-cloud-white text-lg font-bold rounded-full py-4 px-3 shadow-teal-800 text-cyprus hover:-translate-y-1 hover:bg-teal-100 hover:shadow-lg transition-all ease-in-out duration-300"
               >
-                <i class="fa-solid fa-phone px-3"></i>
+                <Phone size={18} className="inline mr-1" />
                 Call 0906 476 9973
               </a>
             </motion.div>
@@ -630,7 +649,7 @@ function Home() {
               viewport={{ once: true }}
               className="flex items-center"
             >
-              <i class="fa-solid fa-triangle-exclamation text-cloud-white text-5xl mx-3"></i>
+              <TriangleAlert size={48} className="text-cloud-white mx-3" />
               <div className="mx-2">
                 <p className="text-3xl text-cloud-white py-2 font-bold">
                   Medical Emergency?
@@ -661,7 +680,7 @@ function Home() {
                 className="flex items-center gap-3 bg-cloud-white text-red-700 text-lg font-bold rounded-full py-3 px-6 shadow-red-800 shadow-md hover:-translate-y-1 hover:shadow-xl transition-all ease-in-out duration-300"
               >
                 <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-100">
-                  <i className="fa-solid fa-phone text-red-700 text-xl"></i>
+                  <Phone size={20} className="text-red-700" />
                 </div>
 
                 <div className="text-left leading-tight">
@@ -691,38 +710,38 @@ function Home() {
             <div className="flex justify-around flex-col sm:flex-row">
               <ul>
                 <li className="text-black/80 leading-15">
-                  <i class="fa-regular fa-circle-check text-green-600 pr-2"></i>{" "}
+                  <CheckCircle2 size={16} className="text-green-600 mr-2 inline" />{" "}
                   Chest pain or difficulty breathing
                 </li>
                 <li className="text-black/80 leading-15">
-                  <i class="fa-regular fa-circle-check text-green-600 pr-2"></i>{" "}
+                  <CheckCircle2 size={16} className="text-green-600 mr-2 inline" />{" "}
                   Severe allergic reactions
                 </li>
                 <li className="text-black/80 leading-15">
-                  <i class="fa-regular fa-circle-check text-green-600 pr-2"></i>{" "}
+                  <CheckCircle2 size={16} className="text-green-600 mr-2 inline" />{" "}
                   Major trauma or injuries
                 </li>
                 <li className="text-black/80 leading-15">
-                  <i class="fa-regular fa-circle-check text-green-600 pr-2"></i>{" "}
+                  <CheckCircle2 size={16} className="text-green-600 mr-2 inline" />{" "}
                   Signs of stroke or heart attack
                 </li>
               </ul>
 
               <ul>
                 <li className="text-black/80 leading-15">
-                  <i class="fa-regular fa-circle-check text-green-600 pr-2"></i>{" "}
+                  <CheckCircle2 size={16} className="text-green-600 mr-2 inline" />{" "}
                   Severe burns or bleeding
                 </li>
                 <li className="text-black/80 leading-15">
-                  <i class="fa-regular fa-circle-check text-green-600 pr-2"></i>{" "}
+                  <CheckCircle2 size={16} className="text-green-600 mr-2 inline" />{" "}
                   Loss of consciousness
                 </li>
                 <li className="text-black/80 leading-15">
-                  <i class="fa-regular fa-circle-check text-green-600 pr-2"></i>{" "}
+                  <CheckCircle2 size={16} className="text-green-600 mr-2 inline" />{" "}
                   Severe abdominal pain
                 </li>
                 <li className="text-black/80 leading-15">
-                  <i class="fa-regular fa-circle-check text-green-600 pr-2"></i>{" "}
+                  <CheckCircle2 size={16} className="text-green-600 mr-2 inline" />{" "}
                   High fever with concoction
                 </li>
               </ul>

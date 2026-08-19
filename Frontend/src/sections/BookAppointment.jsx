@@ -240,6 +240,20 @@ export default function BookAppointment() {
           </section>
         </div>
 
+        <p className="text-xs text-gray-500 text-center">
+          By booking, you agree the hospital may contact you regarding your
+          appointment or care. See our{" "}
+          <a
+            href="/privacy-policy"
+            target="_blank"
+            rel="noreferrer"
+            className="text-teal-600 font-semibold hover:underline"
+          >
+            Privacy Policy
+          </a>
+          .
+        </p>
+
         <button
           disabled={submitting}
           className="w-full bg-cyprus text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-teal-900 transition-all flex justify-center cursor-pointer items-center gap-2 disabled:opacity-50"

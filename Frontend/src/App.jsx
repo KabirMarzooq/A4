@@ -37,6 +37,9 @@ import ReceptionBills from "./sections/BillsandReceipts";
 import Inventory from "./sections/Inventory";
 import GoogleAuthSuccess from "./pages/GoogleAuthSuccess";
 import SalesRecords from "./sections/PharmacySales";
+import LabDashboard from "./sections/LabDashboard";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import TermsOfService from "./pages/TermsOfService";
 
 export default function App() {
   useEffect(() => {
@@ -67,6 +70,8 @@ export default function App() {
           <Route path="/about" element={<About />} />
           <Route path="/services" element={<Services />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/terms-of-service" element={<TermsOfService />} />
         </Route>
 
         <Route path="/login" element={<LogIn />} />
@@ -89,6 +94,7 @@ export default function App() {
                     "admin",
                     "receptionist",
                     "pharmacy",
+                    "lab",
                   ]}
                 />
               }
@@ -107,8 +113,11 @@ export default function App() {
               <Route path="medical-reports" element={<MedicalReport />} />
             </Route>
 
-            {/* Doctor only */}
-            <Route element={<ProtectedRoute allowedRoles={["doctor"]} />}>
+            {/* Doctor + Admin (admin can switch into the Doctor view via
+                the dashboard role switcher — see Dashboard.jsx) */}
+            <Route
+              element={<ProtectedRoute allowedRoles={["doctor", "admin"]} />}
+            >
               <Route path="overview" element={<Overview />} />
               <Route path="schedule" element={<DoctorSchedule />} />
               <Route path="patients" element={<MyPatients />} />
@@ -185,6 +194,14 @@ export default function App() {
               }
             >
               <Route path="sales-records" element={<SalesRecords />} />
+            </Route>
+
+            {/* Lab + Admin — doctors order tests from inside a patient's
+                file (Medical Records), not via this full worklist page */}
+            <Route
+              element={<ProtectedRoute allowedRoles={["lab", "admin"]} />}
+            >
+              <Route path="lab" element={<LabDashboard />} />
             </Route>
           </Route>
         </Route>
