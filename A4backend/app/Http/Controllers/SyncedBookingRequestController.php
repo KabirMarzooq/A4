@@ -21,13 +21,20 @@ class SyncedBookingRequestController extends Controller
     {
         $user = Auth::user();
 
-        return SyncedBookingRequest::when(
-            $user->role === 'doctor',
-            fn($q) => $q->where('requested_doctor_name', $user->name)
-        )
-            ->orderBy('appointment_date')
+        $requests = SyncedBookingRequest::orderBy('appointment_date')
             ->orderBy('appointment_time')
             ->get();
+
+        // Filtered in PHP through the same matchesDoctor() the write guard
+        // uses, rather than in SQL — see that method for why sharing one
+        // implementation matters here.
+        if ($user->role === 'doctor') {
+            $requests = $requests->filter(
+                fn($r) => $this->matchesDoctor($r->requested_doctor_name, $user->name)
+            )->values();
+        }
+
+        return $requests;
     }
 
     /**
@@ -83,8 +90,36 @@ class SyncedBookingRequestController extends Controller
     private function assertDoctorMayAct(SyncedBookingRequest $r): void
     {
         $user = Auth::user();
-        if ($user->role === 'doctor' && $r->requested_doctor_name !== $user->name) {
+        if ($user->role === 'doctor' && !$this->matchesDoctor($r->requested_doctor_name, $user->name)) {
             abort(403, 'This request was addressed to another doctor.');
         }
+    }
+
+    /**
+     * Normalized doctor-name match, shared by index()'s filter and
+     * assertDoctorMayAct()'s write guard so the two can never drift apart
+     * again — that drift WAS the bug: index() matched in SQL (case-
+     * insensitive via the table's utf8mb4_unicode_ci collation, but not
+     * trimmed) while the guard used a strict PHP !==. A doctor whose local
+     * name differed from the cloud-recorded one by only case or stray
+     * whitespace could therefore SEE a request in their queue but got 403'd
+     * every time they tried to act on it, leaving it stuck 'pending' forever.
+     *
+     * Normalizing case/whitespace is correct here: this compares a cloud-side
+     * snapshot string against a local User.name (two independently-maintained
+     * records in separate databases — see the class docblock), not a
+     * credential, so this is not a security downgrade.
+     *
+     * A null requested_doctor_name (patient didn't ask for a specific doctor)
+     * deliberately matches no individual doctor — those fall to admin, who
+     * bypasses this check entirely.
+     */
+    private function matchesDoctor(?string $requestedName, string $doctorName): bool
+    {
+        if ($requestedName === null) {
+            return false;
+        }
+
+        return mb_strtolower(trim($requestedName)) === mb_strtolower(trim($doctorName));
     }
 }

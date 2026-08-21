@@ -325,8 +325,8 @@ function DoctorSyncRequestsTab({ onPendingCountChange }) {
       await api.patch(`/sync-requests/${request.id}/confirm`);
       toast.success("Booking confirmed.");
       fetchRequests();
-    } catch {
-      toast.error("Failed to confirm request.");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to confirm request.");
     }
   };
 
@@ -343,8 +343,8 @@ function DoctorSyncRequestsTab({ onPendingCountChange }) {
       setIsDeclineSidebarOpen(false);
       setDeclineReason("");
       fetchRequests();
-    } catch {
-      toast.error("Failed to decline request.");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to decline request.");
     }
   };
 

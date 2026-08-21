@@ -60,13 +60,26 @@ class AdmissionController extends Controller
     {
         $status = $request->query('status');
         $search = $request->query('search');
+        $user = Auth::user();
+        // Doctors only see admissions for patients they created or are
+        // currently assigned to — the same ownership boundary
+        // PatientFolderController applies to records themselves, so the
+        // ward board can't become a back door to the full patient list.
+        // Admin/receptionist stay unscoped: it's a hospital-wide board.
+        $doctorScoped = $user->role === 'doctor';
 
         $admissions = Admission::with([
             'admittingDoctor:id,name',
-            'patientFile:id,patient_folder_id,first_name,last_name',
+            'patientFile:id,patient_folder_id,first_name,last_name,created_by,current_doctor_id',
             'patientFile.folder:id,folder_name,phone',
         ])
             ->when($status, fn($q) => $q->where('status', $status))
+            ->when(
+                $doctorScoped,
+                fn($q) => $q->whereHas('patientFile', fn($f) => $f
+                    ->where('created_by', $user->id)
+                    ->orWhere('current_doctor_id', $user->id))
+            )
             ->when($search, fn($q) => $q->whereHas(
                 'patientFile',
                 fn($f) => $f->where('first_name', 'like', "%{$search}%")

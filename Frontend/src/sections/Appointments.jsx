@@ -268,8 +268,11 @@ function SyncRequestsTab({ onPendingCountChange }) {
       toast.success("Booking confirmed — create a patient folder next.");
       setFolderPrefill(request);
       fetchRequests();
-    } catch {
-      toast.error("Failed to confirm request.");
+    } catch (err) {
+      // Surface the backend's own reason (e.g. "This request was addressed
+      // to another doctor.") — a bare catch here previously made a real
+      // permission failure look like the button simply did nothing.
+      toast.error(err.response?.data?.message || "Failed to confirm request.");
     }
   };
 
@@ -286,8 +289,8 @@ function SyncRequestsTab({ onPendingCountChange }) {
       setIsDeclineSidebarOpen(false);
       setDeclineReason("");
       fetchRequests();
-    } catch {
-      toast.error("Failed to decline request.");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to decline request.");
     }
   };
 
@@ -434,10 +437,9 @@ function SyncRequestsTab({ onPendingCountChange }) {
                   </div>
                 ) : (
                   <div className="w-full py-3 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold rounded-xl text-center text-xs border border-amber-100 dark:border-amber-500/20 uppercase tracking-widest">
-                    Waiting for{" "}
                     {r.requested_doctor_name
-                      ? `Dr. ${r.requested_doctor_name}`
-                      : "the doctor"}
+                      ? `Waiting for Dr. ${r.requested_doctor_name}`
+                      : "Waiting for admin (no doctor requested)"}
                   </div>
                 )
               ) : r.status === "confirmed" ? (

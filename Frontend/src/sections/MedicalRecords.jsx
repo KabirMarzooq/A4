@@ -57,22 +57,35 @@ export default function MedicalRecords() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [isFormOpen, setIsFormOpen] = useState(false);
-  const [selectedFolder, setSelectedFolder] = useState(
-    searchParams.get("folderId") ? Number(searchParams.get("folderId")) : null
-  ); // → go to level 2
-  const [selectedFile, setSelectedFile] = useState(
-    searchParams.get("fileId") ? Number(searchParams.get("fileId")) : null
-  ); // → go to level 3
+  const [selectedFolder, setSelectedFolder] = useState(null); // → go to level 2
+  const [selectedFile, setSelectedFile] = useState(null); // → go to level 3
 
-  // Deep-linked in from elsewhere (e.g. the "Transferred to you" widget) —
-  // jump straight to the file/folder once, then drop the params so normal
-  // back-navigation within this page works as usual.
+  // Deep-linked in from elsewhere (e.g. Admissions, the "Transferred to
+  // you" widget) — jump straight to the file/folder, then drop the params
+  // so normal back-navigation within this page works as usual.
+  //
+  // This has to be a useEffect reacting to `searchParams`, not a useState
+  // lazy initializer reading `searchParams` once — on a client-side route
+  // transition INTO this page (as opposed to a hard page load/refresh),
+  // this component's very first render can still observe the router's
+  // previous location, so an initializer silently saw no params and always
+  // fell through to the folder list. Confirmed via network trace: the
+  // param was correctly in the URL immediately after navigate(), but the
+  // component still fetched the folder list instead of the file. Depending
+  // on `searchParams` here means this reruns as soon as it actually
+  // catches up, instead of only ever running once at a possibly-stale
+  // moment.
   useEffect(() => {
-    if (searchParams.get("folderId") || searchParams.get("fileId")) {
+    const folderId = searchParams.get("folderId");
+    const fileId = searchParams.get("fileId");
+    if (fileId) {
+      setSelectedFile(Number(fileId));
+      setSearchParams({}, { replace: true });
+    } else if (folderId) {
+      setSelectedFolder(Number(folderId));
       setSearchParams({}, { replace: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   const fetchFolders = async (search = "") => {
     try {
@@ -416,8 +429,14 @@ function PatientFileView({ fileId, onBack }) {
           setLabOrders([]);
         }
       }
-    } catch {
-      toast.error("Failed to load patient file.");
+    } catch (err) {
+      // A 403 (not this doctor's patient), 404, or network failure all land
+      // here. Bouncing back to the list — rather than leaving `file` null
+      // and rendering the shell anyway — avoids a broken-looking page (blank
+      // fields, a literal "File #undefined", action buttons wired to
+      // nothing). onBack() unmounts this view before that render can happen.
+      toast.error(err.response?.data?.message || "Failed to load patient file.");
+      onBack();
     } finally {
       setLoading(false);
     }

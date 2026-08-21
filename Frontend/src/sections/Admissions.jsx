@@ -141,7 +141,7 @@ export default function Admissions() {
                 key={a.id}
                 onClick={() =>
                   navigate(
-                    `/dashboard/medical-records?file=${a.patient_file?.id}`
+                    `/dashboard/medical-records?fileId=${a.patient_file?.id}`
                   )
                 }
                 className={`w-full text-left bg-white dark:bg-slate-800 border rounded-3xl p-5 hover:shadow-md transition-all cursor-pointer ${
