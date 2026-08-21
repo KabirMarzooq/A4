@@ -74,6 +74,7 @@ Both sides run the **same codebase** — one repo, deployed twice with different
 - **Local → Cloud**: when a receptionist confirms or declines one of those requests, that decision gets pushed back up (`php artisan sync:push`) so the online patient's own appointment status actually reflects reality.
 - **Fails safely**: if the local machine has no internet when the sync job runs, both commands just log an error and try again on the next 5-minute cycle — nothing in normal local operation waits on or breaks because of this.
 - Confirming a request does **not** auto-create a patient record — the receptionist reviews the online-submitted details and creates the folder manually (same "New Folder" flow as any walk-in), so a typo or an existing family folder can be caught before it becomes permanent data.
+- A synced request only has a snapshot string (`requested_doctor_name`), not a real foreign key to a local doctor — cloud and local are independent databases with independently-maintained `User` rows. Matching that string to "is this my request?" is normalized (case/whitespace-insensitive) and shared by the queue view and the confirm/decline permission check, so the two can't drift apart into a request a doctor can see but can never act on. A request with no requested doctor at all is addressed to admin, not any individual doctor.
 
 See `App\Http\Controllers\SyncController` (cloud side), `App\Http\Controllers\SyncedBookingRequestController` (local side), and `app/Console/Commands/Sync*.php` for the implementation.
 
@@ -304,7 +305,7 @@ Receipts print/download as a self-contained, inline-styled quarter-A4 (~105×148
 
 `Admission` tracks ward, admission/discharge dates, and status (`admitted`/`discharged`). A patient's file shows a live "Admitted — Ward: X — Day N" badge while active. Discharging just closes out the admission record — any billing that happened during the stay already went through the normal per-visit flow above.
 
-Admitting and discharging happen from inside a patient's file, but the hospital-wide **Admissions** page (`GET /admissions`, nav item for doctor/receptionist/admin) is the ward board: who is currently admitted, which ward, under which doctor, and how many days in — filterable by current/discharged and searchable by patient.
+Admitting and discharging happen from inside a patient's file, but the hospital-wide **Admissions** page (`GET /admissions`, nav item for doctor/receptionist/admin) is the ward board: who is currently admitted, which ward, under which doctor, and how many days in — filterable by current/discharged and searchable by patient. A doctor's ward board is scoped to patients they created or are currently assigned to, the same ownership boundary as patient folders elsewhere; receptionist/admin see the hospital-wide list. Clicking a patient row jumps straight to their file in Medical Records — if the file can't be opened (e.g. a stale row for a patient no longer assigned to you), it bounces back to the folder list with the actual reason instead of rendering a broken page.
 
 ### Offline sync
 
@@ -355,7 +356,7 @@ Six roles: `patient`, `doctor`, `receptionist`, `pharmacy`, `lab`, `admin`. Pati
 | Patient folders — read lookup (search, demographics, billing history) | — | ✅ own patients only | ✅ | — | ✅ | ✅ unscoped |
 | Patient folders — create new patient intake (demographics only) | — | ✅ | ✅ | — | ✅ | ✅ |
 | Dialysis sessions (clinical) | — | ✅ own patients only | — | — | — | ✅ unscoped |
-| Admissions / doctor assignment & transfers | — | ✅ | ✅ | — | — | ✅ |
+| Admissions / doctor assignment & transfers | — | ✅ own patients only | ✅ unscoped | — | — | ✅ unscoped |
 | Order lab tests (no pricing) | — | ✅ own patients only | — | — | ✅ (incl. folder-less walk-in) | ✅ |
 | Fulfil lab orders, email results | — | — | — | — | ✅ | ✅ |
 | Prescriptions — write | — | ✅ | — | — | — | — |
