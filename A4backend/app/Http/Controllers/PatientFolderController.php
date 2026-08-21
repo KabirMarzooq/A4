@@ -19,13 +19,42 @@ class PatientFolderController extends Controller
     // ── FOLDERS ───────────────────────────────────────────────────────────────
 
     /**
-     * List all folders with search by phone or name
+     * List all folders with search by phone or name.
+     *
+     * Pass ?with_files=1 to eager-load each folder's files in the SAME
+     * response. Callers that need every patient across every folder (the
+     * prescription and invoice patient pickers) previously fetched this list
+     * and then issued one GET /folders/{id} per folder — an N+1 burst that
+     * tripped the 60/min rate limiter and failed with a wall of 429s once the
+     * hospital had a realistic number of folders.
      */
     public function indexFolders(Request $request)
     {
         $search = $request->query('search');
+        $withFiles = $request->boolean('with_files');
+        $user = Auth::user();
+        // Doctors only see families with at least one file they created or
+        // are currently assigned to — a file no doctor has ever touched
+        // stays invisible to every doctor until admin/reception assigns it
+        // (see transferFile). Admin/receptionist/lab stay unscoped.
+        $doctorScoped = $user->role === 'doctor';
 
         $folders = PatientFolder::withCount('files')
+            ->when(
+                $doctorScoped,
+                fn($q) => $q->whereHas('files', fn($f) => $f
+                    ->where('created_by', $user->id)
+                    ->orWhere('current_doctor_id', $user->id))
+            )
+            ->when(
+                $withFiles,
+                fn($q) => $q->with(['files' => fn($f) => $f
+                    ->select('id', 'patient_folder_id', 'first_name', 'last_name', 'created_by', 'current_doctor_id')
+                    ->when($doctorScoped, fn($ff) => $ff->where(fn($w) => $w
+                        ->where('created_by', $user->id)
+                        ->orWhere('current_doctor_id', $user->id)))
+                    ->orderBy('first_name')])
+            )
             ->when(
                 $search,
                 fn($q) =>
@@ -105,8 +134,14 @@ class PatientFolderController extends Controller
      */
     public function showFolder($id)
     {
+        $user = Auth::user();
+        $doctorScoped = $user->role === 'doctor';
+
         $folder = PatientFolder::with([
             'files' => fn($q) => $q->withCount('visitRecords')
+                ->when($doctorScoped, fn($f) => $f->where(fn($w) => $w
+                    ->where('created_by', $user->id)
+                    ->orWhere('current_doctor_id', $user->id)))
                 ->orderBy('first_name'),
         ])->findOrFail($id);
 
@@ -156,14 +191,34 @@ class PatientFolderController extends Controller
      */
     public function showFile($fileId)
     {
+        // Receptionists can reach this endpoint to look up a patient for
+        // billing, but must never see clinical content (diagnosis, notes,
+        // exam findings, investigations) — only enough visit metadata
+        // (date, type, fee, doctor) to make sense of an invoice.
+        $isReceptionist = Auth::user()?->role === 'receptionist';
+
         $file = PatientFile::with([
             'folder:id,folder_name,card_number,phone,address',
             'currentDoctor:id,name,specialization',
             'currentAdmission',
-            'visitRecords' => fn($q) =>
-            $q->with('doctor:id,name,specialization,role')
-                ->orderBy('visit_date', 'desc'),
+            'visitRecords' => function ($q) use ($isReceptionist) {
+                $q->orderBy('visit_date', 'desc');
+                if ($isReceptionist) {
+                    $q->select(
+                        'id',
+                        'patient_file_id',
+                        'visit_date',
+                        'visit_type',
+                        'consultation_fee',
+                        'doctor_id'
+                    )->with('doctor:id,name,specialization,role');
+                } else {
+                    $q->with('doctor:id,name,specialization,role');
+                }
+            },
         ])->findOrFail($fileId);
+
+        $this->assertDoctorOwnsFile($file);
 
         return response()->json($file);
     }
@@ -174,12 +229,31 @@ class PatientFolderController extends Controller
     public function updateFile(Request $request, $fileId)
     {
         $file = PatientFile::findOrFail($fileId);
+        $this->assertDoctorOwnsFile($file);
 
         $request->validate($this->patientFileValidationRules(true));
 
         $file->update($request->only($this->patientFileFields()));
 
         return response()->json($file);
+    }
+
+    /**
+     * A doctor may only view/edit a patient file they created or are
+     * currently assigned to (patient_files.created_by / current_doctor_id).
+     * Admin/receptionist are never scoped — this is purely a per-doctor
+     * ownership boundary, not a general access-control layer.
+     */
+    private function assertDoctorOwnsFile(PatientFile $file): void
+    {
+        $user = Auth::user();
+        if (
+            $user->role === 'doctor'
+            && $file->created_by !== $user->id
+            && $file->current_doctor_id !== $user->id
+        ) {
+            abort(403, 'You are not assigned to this patient.');
+        }
     }
 
     /**
@@ -272,8 +346,9 @@ class PatientFolderController extends Controller
             'reason'       => 'nullable|string|max:255',
         ]);
 
+        // Admin counts as a doctor here too (see AppointmentController::getDoctors).
         $toDoctor = User::where('id', $request->to_doctor_id)
-            ->where('role', 'doctor')
+            ->whereIn('role', ['doctor', 'admin'])
             ->firstOrFail();
 
         PatientFileTransfer::create([
@@ -320,12 +395,14 @@ class PatientFolderController extends Controller
     // ── VISIT RECORDS ─────────────────────────────────────────────────────────
 
     /**
-     * Add a visit record to a patient file.
-     * If consultation_fee is provided, generates an invoice for reception.
+     * Add a visit record to a patient file. Purely clinical — billing is
+     * reception/admin's job now (ReceptionBillingController::storeInvoice),
+     * not generated from what a doctor writes here.
      */
     public function storeVisitRecord(Request $request, $fileId)
     {
         $file = PatientFile::with('folder')->findOrFail($fileId);
+        $this->assertDoctorOwnsFile($file);
 
         $request->validate([
             'visit_date'           => 'required|date',
@@ -342,7 +419,6 @@ class PatientFolderController extends Controller
             'diagnosis'            => 'nullable|string',
             'notes'                => 'nullable|string',
             'action_taken'         => 'nullable|string|max:255',
-            'consultation_fee'     => 'nullable|numeric|min:0',
             'visit_type'           => 'nullable|in:general,dialysis',
             'admission_id'         => 'nullable|exists:admissions,id',
             'access_type'          => 'nullable|string|max:100',
@@ -381,7 +457,6 @@ class PatientFolderController extends Controller
                     'diagnosis',
                     'notes',
                     'action_taken',
-                    'consultation_fee',
                     'access_type',
                     'infection_status',
                     'machine_no',
@@ -403,59 +478,19 @@ class PatientFolderController extends Controller
                 'admission_id'    => $request->input('admission_id') ?? $file->currentAdmission?->id,
             ]);
 
-            // If consultation fee provided — generate invoice
-            // No fixed price here: the doctor writes down what they actually
-            // charged for this visit, and that's the whole bill — no platform
-            // service charge added on top (was 2%, commented out below).
-            $invoice = null;
-            if ($request->filled('consultation_fee') && $request->consultation_fee > 0) {
-                $fee   = (float) $request->consultation_fee;
-                // $serviceCharge = round($fee * 0.02, 2);
-                $total = $fee;
-
-                $invoice = Invoice::create([
-                    'invoice_number'  => Invoice::generateInvoiceNumber(),
-                    'patient_file_id' => $fileId,
-                    'doctor_id'       => Auth::id(),
-                    'type'            => 'Hospital_Bill',
-                    'subtotal'        => $fee,
-                    'service_charge'  => 0,
-                    'total_amount'    => $total,
-                    'currency'        => 'NGN',
-                    'status'          => 'unpaid',
-                    'due_date'        => now()->addDays(1),
-                ]);
-
-                InvoiceItem::create([
-                    'invoice_id'  => $invoice->id,
-                    'description' => 'Hospital Bill — ' . $file->full_name,
-                    'quantity'    => 1,
-                    'unit_price'  => $fee,
-                    'total_price' => $fee,
-                ]);
-
-                // InvoiceItem::create([
-                //     'invoice_id'  => $invoice->id,
-                //     'description' => 'Platform Service Charge (2%)',
-                //     'quantity'    => 1,
-                //     'unit_price'  => $serviceCharge,
-                //     'total_price' => $serviceCharge,
-                // ]);
-            }
-
             return response()->json([
-                'record'  => $record->load('doctor:id,name'),
-                'invoice' => $invoice,
+                'record' => $record->load('doctor:id,name'),
             ], 201);
         });
     }
 
     /**
-     * Update an existing visit record
+     * Update an existing visit record. Purely clinical, same as above.
      */
     public function updateVisitRecord(Request $request, $recordId)
     {
         $record = VisitRecord::with('patientFile.folder')->findOrFail($recordId);
+        $this->assertDoctorOwnsFile($record->patientFile);
 
         $request->validate([
             'chief_complaint'      => 'sometimes|string|max:255',
@@ -469,7 +504,6 @@ class PatientFolderController extends Controller
             'diagnosis'            => 'nullable|string',
             'notes'                => 'nullable|string',
             'action_taken'         => 'nullable|string|max:255',
-            'consultation_fee'     => 'nullable|numeric|min:0',
             'access_type'          => 'nullable|string|max:100',
             'infection_status'     => 'nullable|string|max:100',
             'machine_no'           => 'nullable|string|max:50',
@@ -485,121 +519,33 @@ class PatientFolderController extends Controller
         // visit_type/session_number are set once at creation and never
         // change on edit — same as card_number/invoice_number never being
         // regenerated on update.
-        return DB::transaction(function () use ($request, $record) {
-            $record->update($request->only([
-                'chief_complaint',
-                'physical_examination',
-                'investigation',
-                'test_results',
-                'blood_pressure',
-                'temperature_c',
-                'heart_rate',
-                'oxygen_saturation',
-                'diagnosis',
-                'notes',
-                'action_taken',
-                'consultation_fee',
-                'access_type',
-                'infection_status',
-                'machine_no',
-                'pre_bp',
-                'post_bp',
-                'pre_weight_kg',
-                'post_weight_kg',
-                'uf_ml',
-                'duration_hours',
-                'complications',
-            ]));
+        $record->update($request->only([
+            'chief_complaint',
+            'physical_examination',
+            'investigation',
+            'test_results',
+            'blood_pressure',
+            'temperature_c',
+            'heart_rate',
+            'oxygen_saturation',
+            'diagnosis',
+            'notes',
+            'action_taken',
+            'access_type',
+            'infection_status',
+            'machine_no',
+            'pre_bp',
+            'post_bp',
+            'pre_weight_kg',
+            'post_weight_kg',
+            'uf_ml',
+            'duration_hours',
+            'complications',
+        ]));
 
-            $invoice     = null;
-            $invoiceAction = null;
-
-            if ($request->filled('consultation_fee') && $request->consultation_fee > 0) {
-                $fee = (float) $request->consultation_fee;
-                // No fixed price / no platform service charge (was 2%) — the
-                // doctor-entered fee is the whole bill. Commented out, not
-                // deleted, in case a percentage charge is reintroduced.
-                // $serviceCharge = round($fee * 0.02, 2);
-                $total = $fee;
-
-                // Look for an existing unpaid invoice for this patient file
-                // that was generated as a consultation (not a registration fee)
-                $existingInvoice = Invoice::where('patient_file_id', $record->patient_file_id)
-                    ->where('type', 'consultation')
-                    ->whereNull('folder_id')    // exclude registration fee invoices
-                    ->whereIn('status', ['unpaid', 'overdue'])
-                    ->latest()
-                    ->first();
-
-                if ($existingInvoice) {
-                    // Update existing unpaid invoice with new amounts
-                    $existingInvoice->update([
-                        'subtotal'       => $fee,
-                        'service_charge' => 0,
-                        'total_amount'   => $total,
-                    ]);
-
-                    // Update the consultation fee line item
-                    $existingInvoice->items()
-                        ->where('description', 'not like', '%Service Charge%')
-                        ->update([
-                            'unit_price'  => $fee,
-                            'total_price' => $fee,
-                        ]);
-
-                    // // Update the service charge line item
-                    // $existingInvoice->items()
-                    //     ->where('description', 'like', '%Service Charge%')
-                    //     ->update([
-                    //         'unit_price'  => $serviceCharge,
-                    //         'total_price' => $serviceCharge,
-                    //     ]);
-
-                    $invoice       = $existingInvoice;
-                    $invoiceAction = 'updated';
-                } else {
-                    // No existing unpaid invoice — create a fresh one
-                    $patientName = $record->patientFile->first_name . ' ' . $record->patientFile->last_name;
-
-                    $invoice = Invoice::create([
-                        'invoice_number'  => Invoice::generateInvoiceNumber(),
-                        'patient_file_id' => $record->patient_file_id,
-                        'doctor_id'       => Auth::id(),
-                        'type'            => 'consultation',
-                        'subtotal'        => $fee,
-                        'service_charge'  => 0,
-                        'total_amount'    => $total,
-                        'currency'        => 'NGN',
-                        'status'          => 'unpaid',
-                        'due_date'        => now()->addDays(1),
-                    ]);
-
-                    InvoiceItem::create([
-                        'invoice_id'  => $invoice->id,
-                        'description' => 'Hospital Bill — ' . $patientName,
-                        'quantity'    => 1,
-                        'unit_price'  => $fee,
-                        'total_price' => $fee,
-                    ]);
-
-                    // InvoiceItem::create([
-                    //     'invoice_id'  => $invoice->id,
-                    //     'description' => 'Platform Service Charge (2%)',
-                    //     'quantity'    => 1,
-                    //     'unit_price'  => $serviceCharge,
-                    //     'total_price' => $serviceCharge,
-                    // ]);
-
-                    $invoiceAction = 'created';
-                }
-            }
-
-            return response()->json([
-                'record'        => $record->load('doctor:id,name'),
-                'invoice'       => $invoice,
-                'invoice_action' => $invoiceAction, // 'created', 'updated', or null
-            ]);
-        });
+        return response()->json([
+            'record' => $record->load('doctor:id,name'),
+        ]);
     }
 
     /**

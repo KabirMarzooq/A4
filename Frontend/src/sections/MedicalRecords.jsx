@@ -26,25 +26,23 @@ import {
   ClipboardList,
   Microscope,
   FlaskConical,
-  BadgeDollarSign,
   Pill,
   Waves,
   Bed,
   LogOut,
   MoreHorizontal,
+  Download,
+  Printer,
 } from "lucide-react";
 import api from "../services/api";
+import { isDoctorRecordAuthor } from "../utils/roleDisplay";
+import { toTitleCase, toSentenceCase } from "../utils/textCase";
+import { printPrescription } from "../utils/printPrescription";
+import { printMedicalRecord } from "../utils/printMedicalRecord";
 import { toast } from "react-hot-toast";
 
 const inputClass =
   "w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 text-sm";
-
-const formatNGN = (amount) =>
-  new Intl.NumberFormat("en-NG", {
-    style: "currency",
-    currency: "NGN",
-    minimumFractionDigits: 2,
-  }).format(amount || 0);
 
 const calcAge = (dob) => {
   if (!dob) return null;
@@ -371,6 +369,14 @@ function FolderView({ folderId, onBack, onSelectFile }) {
 
 // ── LEVEL 3: PATIENT FILE VIEW ────────────────────────────────────────────────
 function PatientFileView({ fileId, onBack }) {
+  // Receptionists reach this view to register/bill a patient, but must never
+  // see or write clinical content — the backend already strips clinical
+  // fields from the API response for them (PatientFolderController::showFile),
+  // this just keeps the UI from offering actions that would 403 anyway and
+  // from rendering now-empty clinical sections.
+  const currentUser = JSON.parse(localStorage.getItem("a4_user") || "null");
+  const isReceptionist = currentUser?.role?.toLowerCase() === "receptionist";
+
   const [data, setData] = useState(null);
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -386,15 +392,30 @@ function PatientFileView({ fileId, onBack }) {
   const [isDischargeOpen, setIsDischargeOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [isLabOrderOpen, setIsLabOrderOpen] = useState(false);
+  const [labOrders, setLabOrders] = useState([]);
 
   const fetchFile = async () => {
     try {
-      const [fileRes, prescRes] = await Promise.all([
-        api.get(`/folders/files/${fileId}`),
-        api.get(`/folders/files/${fileId}/prescriptions`),
-      ]);
+      const fileRes = await api.get(`/folders/files/${fileId}`);
       setFile(fileRes.data);
-      setPrescriptions(prescRes.data || []);
+      // Receptionist never sees the Visit History tab strip (Prescriptions
+      // and Lab Results included) — no point fetching either.
+      if (!isReceptionist) {
+        try {
+          const prescRes = await api.get(
+            `/folders/files/${fileId}/prescriptions`
+          );
+          setPrescriptions(prescRes.data || []);
+        } catch {
+          setPrescriptions([]);
+        }
+        try {
+          const labRes = await api.get(`/lab-orders/patient/${fileId}`);
+          setLabOrders(labRes.data || []);
+        } catch {
+          setLabOrders([]);
+        }
+      }
     } catch {
       toast.error("Failed to load patient file.");
     } finally {
@@ -425,22 +446,47 @@ function PatientFileView({ fileId, onBack }) {
   // until a second type is actually requested.
   const generalRecords = records.filter((r) => r.visit_type !== "dialysis");
   const dialysisRecords = records.filter((r) => r.visit_type === "dialysis");
+  const completedLabOrders = labOrders.filter((o) => o.status === "completed");
 
   const tabs = [
     { id: "overview", label: "Overview", icon: <ClipboardList size={15} /> },
-    {
-      id: "dialysis",
-      label: "Dialysis",
-      icon: <Waves size={15} />,
-      count: dialysisRecords.length,
-    },
+    // Dialysis and Lab Results are purely historical — the tab only exists
+    // once there's actually something in it. Prescriptions stays
+    // permanently visible by contrast: staff go there *to check*, and
+    // "none on file" is itself useful information.
+    ...(dialysisRecords.length > 0
+      ? [
+          {
+            id: "dialysis",
+            label: "Dialysis",
+            icon: <Waves size={15} />,
+            count: dialysisRecords.length,
+          },
+        ]
+      : []),
     {
       id: "prescriptions",
       label: "Prescriptions",
       icon: <Pill size={15} />,
       count: prescriptions.length,
     },
+    ...(completedLabOrders.length > 0
+      ? [
+          {
+            id: "lab-results",
+            label: "Lab Results",
+            icon: <FlaskConical size={15} />,
+            count: completedLabOrders.length,
+          },
+        ]
+      : []),
   ];
+
+  // Guard against sitting on a tab that has since disappeared — e.g. viewing
+  // Dialysis when the last session for this patient was removed.
+  const currentTab = tabs.some((t) => t.id === activeTab)
+    ? activeTab
+    : "overview";
 
   return (
     <div className="p-6">
@@ -502,6 +548,8 @@ function PatientFileView({ fileId, onBack }) {
             </div>
           </div>
           <div className="flex flex-wrap gap-3 md:ml-auto md:justify-end">
+            {/* Assigning a walk-in to a doctor is front-desk work, so
+                receptionist keeps this — it exposes no clinical content. */}
             <button
               onClick={() => setIsTransferOpen(true)}
               className="flex items-center gap-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 px-5 py-3 rounded-2xl font-bold text-sm transition-all active:scale-95 cursor-pointer"
@@ -530,16 +578,42 @@ function PatientFileView({ fileId, onBack }) {
                     onClick={() => setIsMoreMenuOpen(false)}
                   />
                   <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl z-50 overflow-hidden py-1.5">
-                    <button
-                      onClick={() => {
-                        setIsMoreMenuOpen(false);
-                        setIsDialysisFormOpen(true);
-                      }}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
-                    >
-                      <Waves size={15} className="text-blue-500" /> Log
-                      Dialysis Session
-                    </button>
+                    {/* Reception's file view never loads clinical content
+                        (see fetchFile above), so there's nothing complete to
+                        print — the button only appears once there is. */}
+                    {!isReceptionist && (
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          printMedicalRecord({
+                            file,
+                            generalRecords,
+                            dialysisRecords,
+                            prescriptions,
+                            labResults: completedLabOrders,
+                          });
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
+                      >
+                        <Printer size={15} className="text-teal-500" /> Print
+                        Medical Record
+                      </button>
+                    )}
+                    {/* Logging a dialysis session is clinical documentation —
+                        admitting and ordering a test are logistics, so
+                        reception keeps those two. */}
+                    {!isReceptionist && (
+                      <button
+                        onClick={() => {
+                          setIsMoreMenuOpen(false);
+                          setIsDialysisFormOpen(true);
+                        }}
+                        className="w-full flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
+                      >
+                        <Waves size={15} className="text-blue-500" /> Log
+                        Dialysis Session
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         setIsMoreMenuOpen(false);
@@ -575,12 +649,14 @@ function PatientFileView({ fileId, onBack }) {
                 </>
               )}
             </div>
-            <button
-              onClick={() => setIsVisitFormOpen(true)}
-              className="flex items-center gap-2 bg-teal-500 hover:bg-teal-600 text-white px-5 py-3 rounded-2xl font-bold text-sm shadow-lg shadow-teal-500/20 transition-all active:scale-95 cursor-pointer"
-            >
-              <Plus size={16} /> Add Visit Record
-            </button>
+            {!isReceptionist && (
+              <button
+                onClick={() => setIsVisitFormOpen(true)}
+                className="flex items-center gap-2 bg-teal-500 hover:bg-teal-600 text-white px-5 py-3 rounded-2xl font-bold text-sm shadow-lg shadow-teal-500/20 transition-all active:scale-95 cursor-pointer"
+              >
+                <Plus size={16} /> Add Visit Record
+              </button>
+            )}
           </div>
         </div>
 
@@ -734,7 +810,13 @@ function PatientFileView({ fileId, onBack }) {
         </div>
       )}
 
-      {/* Visit records timeline */}
+      {/* Visit records timeline — clinical documentation, off-limits to
+          reception entirely (not just field-stripped like showFile already
+          does server-side). Reprinting a prescription is still available
+          via the dedicated "Prescriptions" nav page, which isn't this
+          per-file clinical timeline. */}
+      {!isReceptionist && (
+        <>
       <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">
         Visit History ({records.length})
       </h3>
@@ -745,7 +827,7 @@ function PatientFileView({ fileId, onBack }) {
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`flex items-center gap-2 px-5 py-3 text-sm font-bold rounded-t-xl transition-all cursor-pointer ${
-              activeTab === tab.id
+              currentTab === tab.id
                 ? "bg-white dark:bg-slate-800 text-teal-600 border border-b-white dark:border-slate-700 dark:border-b-slate-800 -mb-px"
                 : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
             }`}
@@ -761,7 +843,7 @@ function PatientFileView({ fileId, onBack }) {
         ))}
       </div>
 
-      {activeTab === "overview" && (
+      {currentTab === "overview" && (
         <>
           {generalRecords.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -800,32 +882,36 @@ function PatientFileView({ fileId, onBack }) {
                       </p>
                       <div className="flex items-center gap-3">
                         <p className="text-xs text-slate-400">
-                          {record.doctor?.role?.toLowerCase() === "doctor"
-                            ? "Dr. "
-                            : ""}
+                          {isDoctorRecordAuthor(record.doctor) ? "Dr. " : ""}
                           {record.doctor?.name}
                           {record.doctor?.specialization
                             ? ` · ${record.doctor.specialization}`
                             : ""}
                         </p>
-                        <button
-                          onClick={() => setEditingRecord(record)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                        >
-                          <Pencil size={12} /> Edit
-                        </button>
+                        {!isReceptionist && (
+                          <button
+                            onClick={() => setEditingRecord(record)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                          >
+                            <Pencil size={12} /> Edit
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    {/* Chief complaint */}
-                    <div className="bg-teal-50 dark:bg-teal-500/10 border border-teal-100 dark:border-teal-500/20 rounded-2xl px-4 py-3 mb-4">
-                      <p className="text-[10px] font-bold text-teal-600 uppercase tracking-wider mb-1">
-                        Chief Complaint
-                      </p>
-                      <p className="text-sm text-slate-700 dark:text-slate-300">
-                        {record.chief_complaint}
-                      </p>
-                    </div>
+                    {/* Chief complaint — clinical content, stripped from the
+                        API response for receptionists, so skip the box
+                        entirely rather than show it empty */}
+                    {!isReceptionist && (
+                      <div className="bg-teal-50 dark:bg-teal-500/10 border border-teal-100 dark:border-teal-500/20 rounded-2xl px-4 py-3 mb-4">
+                        <p className="text-[10px] font-bold text-teal-600 uppercase tracking-wider mb-1">
+                          Chief Complaint
+                        </p>
+                        <p className="text-sm text-slate-700 dark:text-slate-300">
+                          {record.chief_complaint}
+                        </p>
+                      </div>
+                    )}
 
                     {/* Vitals */}
                     {(record.blood_pressure ||
@@ -917,17 +1003,6 @@ function PatientFileView({ fileId, onBack }) {
                           </span>
                         </div>
                       )}
-                      {record.consultation_fee && (
-                        <div className="flex items-center gap-2 bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 rounded-xl px-3 py-2">
-                          <BadgeDollarSign
-                            size={13}
-                            className="text-green-600"
-                          />
-                          <span className="text-xs text-green-700 dark:text-green-400 font-bold">
-                            Hospital Bill: {formatNGN(record.consultation_fee)}
-                          </span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -962,7 +1037,7 @@ function PatientFileView({ fileId, onBack }) {
         </>
       )}
 
-      {activeTab === "dialysis" && (
+      {currentTab === "dialysis" && (
         <DialysisTab
           records={dialysisRecords}
           profile={profile}
@@ -971,8 +1046,17 @@ function PatientFileView({ fileId, onBack }) {
         />
       )}
 
-      {activeTab === "prescriptions" && (
-        <PrescriptionsTab prescriptions={prescriptions} />
+      {currentTab === "prescriptions" && (
+        <PrescriptionsTab
+          prescriptions={prescriptions}
+          patientName={file?.full_name}
+        />
+      )}
+
+      {currentTab === "lab-results" && (
+        <LabResultsTab orders={completedLabOrders} />
+      )}
+        </>
       )}
 
       {/* Visit record form */}
@@ -1052,7 +1136,7 @@ function PatientFileView({ fileId, onBack }) {
 }
 
 // ── PRESCRIPTIONS TAB ─────────────────────────────────────────────────────────
-function PrescriptionsTab({ prescriptions }) {
+function PrescriptionsTab({ prescriptions, patientName }) {
   if (prescriptions.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -1078,9 +1162,18 @@ function PrescriptionsTab({ prescriptions }) {
             <div className="w-10 h-10 bg-teal-500/10 rounded-xl flex items-center justify-center text-teal-600">
               <Pill size={18} />
             </div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-              {p.created_at?.split("T")[0]}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                {p.created_at?.split("T")[0]}
+              </span>
+              <button
+                onClick={() => printPrescription(p, patientName)}
+                className="p-1.5 text-slate-400 hover:text-teal-500 hover:bg-teal-500/10 rounded-lg transition-all cursor-pointer"
+                title="Print / Download"
+              >
+                <Download size={14} />
+              </button>
+            </div>
           </div>
 
           {/* Drug items */}
@@ -1122,6 +1215,57 @@ function PrescriptionsTab({ prescriptions }) {
   );
 }
 
+// ── LAB RESULTS TAB ────────────────────────────────────────────────────────
+function LabResultsTab({ orders }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {orders.map((o) => (
+        <div
+          key={o.id}
+          className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-5 hover:shadow-md transition-all"
+        >
+          <div className="flex justify-between items-start mb-4">
+            <div className="w-10 h-10 bg-cyan-500/10 rounded-xl flex items-center justify-center text-cyan-600">
+              <FlaskConical size={18} />
+            </div>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              {o.completed_at?.split("T")[0]}
+            </span>
+          </div>
+
+          <p className="font-bold text-slate-800 dark:text-white text-sm mb-2">
+            {o.test_name}
+          </p>
+
+          {o.result_summary && (
+            <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+              {o.result_summary}
+            </p>
+          )}
+
+          {o.result_file_name && (
+            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900/50 rounded-xl px-3 py-2 border border-slate-100 dark:border-slate-700 mb-3">
+              <FileText size={14} className="text-teal-500" />
+              <span className="text-xs text-slate-600 dark:text-slate-300 truncate">
+                {o.result_file_name}
+              </span>
+            </div>
+          )}
+
+          <p className="text-xs text-slate-400">
+            {o.lab_staff?.name ? `Completed by ${o.lab_staff.name}` : "Completed"}
+          </p>
+          {o.sent_at && (
+            <p className="text-[10px] text-teal-600 dark:text-teal-400 font-bold mt-1">
+              Sent to {o.sent_to_email}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── TRANSFER / ASSIGN DOCTOR MODAL ────────────────────────────────────────────
 function TransferModal({
   isOpen,
@@ -1135,13 +1279,16 @@ function TransferModal({
   const [toDoctorId, setToDoctorId] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadingDoctors, setLoadingDoctors] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
+    setLoadingDoctors(true);
     api
       .get("/doctors")
       .then((res) => setDoctors(res.data || []))
-      .catch(() => toast.error("Failed to load doctors."));
+      .catch(() => toast.error("Failed to load doctors."))
+      .finally(() => setLoadingDoctors(false));
   }, [isOpen]);
 
   const handleSubmit = async (e) => {
@@ -1205,15 +1352,35 @@ function TransferModal({
               className={inputClass}
               value={toDoctorId}
               onChange={(e) => setToDoctorId(e.target.value)}
+              disabled={loadingDoctors || doctors.length === 0}
             >
-              <option value="">Select a doctor</option>
+              <option value="">
+                {loadingDoctors
+                  ? "Loading doctors..."
+                  : doctors.length === 0
+                    ? "No approved doctors available"
+                    : "Select a doctor"}
+              </option>
               {doctors.map((d) => (
                 <option key={d.id} value={d.id}>
                   Dr. {d.name}
-                  {d.specialization ? ` — ${d.specialization}` : ""}
+                  {d.role === "admin"
+                    ? " — Hospital Administrator"
+                    : d.specialization
+                      ? ` — ${d.specialization}`
+                      : ""}
                 </option>
               ))}
             </select>
+            {/* An empty list means no doctor account has been approved yet —
+                distinct from the request having failed, which previously
+                looked identical to the user. */}
+            {!loadingDoctors && doctors.length === 0 && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1.5">
+                No approved doctors found. An admin needs to approve a doctor
+                account before patients can be assigned.
+              </p>
+            )}
           </FormField>
           <FormField label="Reason (optional)">
             <input
@@ -1241,8 +1408,20 @@ function TransferModal({
 // A compact register-style table (not the narrative timeline) so staff
 // coming from the hospital's Excel sheet see something familiar, and so
 // "how many sessions has this patient had" is answered at a glance.
+const DIALYSIS_PAGE_SIZE = 10;
+
 function DialysisTab({ records, profile, onAdd, onEdit }) {
   const age = calcAge(profile?.date_of_birth);
+  const [page, setPage] = useState(1);
+
+  // A long-running dialysis patient accumulates hundreds of sessions; without
+  // paging the table grows unbounded down the page.
+  const totalPages = Math.max(1, Math.ceil(records.length / DIALYSIS_PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const visibleRecords = records.slice(
+    (safePage - 1) * DIALYSIS_PAGE_SIZE,
+    safePage * DIALYSIS_PAGE_SIZE
+  );
 
   if (records.length === 0) {
     return (
@@ -1274,7 +1453,6 @@ function DialysisTab({ records, profile, onAdd, onEdit }) {
     "Duration(hrs)",
     "Complications",
     "Remarks",
-    "Fee",
     "",
   ];
 
@@ -1293,7 +1471,7 @@ function DialysisTab({ records, profile, onAdd, onEdit }) {
         </p>
       </div>
 
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl shadow-sm overflow-x-auto">
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl shadow-sm overflow-x-auto custom-scrollbar">
         <table className="w-full text-left border-collapse text-sm min-w-[1400px]">
           <thead>
             <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50">
@@ -1308,7 +1486,7 @@ function DialysisTab({ records, profile, onAdd, onEdit }) {
             </tr>
           </thead>
           <tbody>
-            {records.map((r) => (
+            {visibleRecords.map((r) => (
               <tr
                 key={r.id}
                 className="border-b border-slate-50 dark:border-slate-700/50 last:border-0"
@@ -1349,15 +1527,6 @@ function DialysisTab({ records, profile, onAdd, onEdit }) {
                 </td>
                 <td className="px-4 py-3 max-w-[160px] truncate text-slate-500">{r.notes || "—"}</td>
                 <td className="px-4 py-3 whitespace-nowrap">
-                  {r.consultation_fee ? (
-                    <span className="text-green-600 dark:text-green-400 font-bold">
-                      {formatNGN(r.consultation_fee)}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td className="px-4 py-3 whitespace-nowrap">
                   <button
                     onClick={() => onEdit(r)}
                     className="p-2 text-slate-400 hover:text-teal-600 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full cursor-pointer"
@@ -1370,6 +1539,32 @@ function DialysisTab({ records, profile, onAdd, onEdit }) {
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4">
+          <p className="text-xs text-slate-500">
+            Showing {(safePage - 1) * DIALYSIS_PAGE_SIZE + 1}–
+            {Math.min(safePage * DIALYSIS_PAGE_SIZE, records.length)} of{" "}
+            {records.length} sessions
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={safePage <= 1}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-40 cursor-pointer"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={safePage >= totalPages}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-teal-500 text-white disabled:opacity-40 cursor-pointer"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1393,7 +1588,6 @@ const EMPTY_DIALYSIS_FORM = {
   duration_hours: "",
   complications: "",
   notes: "",
-  consultation_fee: "",
 };
 
 function DialysisSessionForm({
@@ -1424,7 +1618,6 @@ function DialysisSessionForm({
         duration_hours: editingRecord.duration_hours ?? "",
         complications: editingRecord.complications || "",
         notes: editingRecord.notes || "",
-        consultation_fee: editingRecord.consultation_fee ?? "",
       });
     } else if (isOpen) {
       setForm(EMPTY_DIALYSIS_FORM);
@@ -1433,13 +1626,20 @@ function DialysisSessionForm({
 
   const handleSubmit = async () => {
     setSaving(true);
+    // Also normalized server-side (VisitRecord's set*Attribute mutators).
+    const payload = {
+      ...form,
+      diagnosis: toSentenceCase(form.diagnosis),
+      complications: toSentenceCase(form.complications),
+      notes: toSentenceCase(form.notes),
+    };
     try {
       if (editingRecord) {
-        await api.patch(`/folders/visits/${editingRecord.id}`, form);
+        await api.patch(`/folders/visits/${editingRecord.id}`, payload);
         toast.success("Dialysis session updated.");
       } else {
         const res = await api.post(`/folders/files/${fileId}/visits`, {
-          ...form,
+          ...payload,
           visit_type: "dialysis",
         });
         const record = res.data?.record;
@@ -1489,7 +1689,7 @@ function DialysisSessionForm({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField label="Visit Date *">
               <input
@@ -1623,23 +1823,6 @@ function DialysisSessionForm({
               onChange={(e) => set("notes", e.target.value)}
             />
           </FormField>
-
-          <div className="bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 rounded-2xl p-4">
-            <FormField label="Hospital Bill (₦) — leave blank if not billing now">
-              <input
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-                className={inputClass}
-                value={form.consultation_fee}
-                onChange={(e) => set("consultation_fee", e.target.value)}
-              />
-            </FormField>
-            <p className="text-xs text-green-700 dark:text-green-400 mt-2">
-              Entering a fee will automatically generate an invoice that appears in reception for
-              payment.
-            </p>
-          </div>
         </div>
 
         <div className="p-6 border-t border-slate-100 dark:border-slate-700">
@@ -1841,14 +2024,12 @@ function DischargeModal({ isOpen, onClose, admissionId, patientName, onSaved }) 
 // ── ORDER LAB TEST MODAL ──────────────────────────────────────────────────────
 function OrderLabTestModal({ isOpen, onClose, fileId, patientName, onSaved }) {
   const [testCatalog, setTestCatalog] = useState([]);
-  const [lines, setLines] = useState([
-    { lab_test_id: "", test_name: "", price: "" },
-  ]);
+  const [lines, setLines] = useState([{ lab_test_id: "", test_name: "" }]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
-      setLines([{ lab_test_id: "", test_name: "", price: "" }]);
+      setLines([{ lab_test_id: "", test_name: "" }]);
       return;
     }
     api.get("/lab-tests").then((res) => setTestCatalog(res.data || []));
@@ -1861,14 +2042,13 @@ function OrderLabTestModal({ isOpen, onClose, fileId, patientName, onSaved }) {
       next[i] = {
         lab_test_id: testId,
         test_name: test?.name || "",
-        price: test?.price || "",
       };
       return next;
     });
   };
 
   const handleSubmit = async () => {
-    const validLines = lines.filter((l) => l.test_name && l.price);
+    const validLines = lines.filter((l) => l.test_name);
     if (validLines.length === 0) return toast.error("Add at least one test.");
     setSaving(true);
     try {
@@ -1928,7 +2108,8 @@ function OrderLabTestModal({ isOpen, onClose, fileId, patientName, onSaved }) {
                 <option value="">Select a test...</option>
                 {testCatalog.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.name} — ₦{Number(t.price).toLocaleString()}
+                    {t.name}
+                    {t.category ? ` — ${t.category}` : ""}
                   </option>
                 ))}
               </select>
@@ -1955,10 +2136,7 @@ function OrderLabTestModal({ isOpen, onClose, fileId, patientName, onSaved }) {
 
         <button
           onClick={() =>
-            setLines((prev) => [
-              ...prev,
-              { lab_test_id: "", test_name: "", price: "" },
-            ])
+            setLines((prev) => [...prev, { lab_test_id: "", test_name: "" }])
           }
           className="flex items-center gap-1 text-teal-600 text-xs font-bold mb-5 cursor-pointer"
         >
@@ -2000,12 +2178,16 @@ function FolderForm({ isOpen, onClose, editingFolder, onSaved }) {
     if (!form.folder_name || !form.phone)
       return toast.error("Name and phone are required.");
     setSaving(true);
+    // Also normalized server-side (PatientFolder::setFolderNameAttribute) —
+    // doing it here too means the form's own onSaved refresh shows it
+    // correctly cased without waiting on a refetch to notice the mutator ran.
+    const payload = { ...form, folder_name: toTitleCase(form.folder_name) };
     try {
       if (editingFolder) {
-        await api.patch(`/folders/${editingFolder.id}`, form);
+        await api.patch(`/folders/${editingFolder.id}`, payload);
         toast.success("Folder updated.");
       } else {
-        await api.post("/folders", form);
+        await api.post("/folders", payload);
         toast.success("Folder created.");
         setForm({ folder_name: "", phone: "", address: "" });
       }
@@ -2146,12 +2328,27 @@ function PatientFileForm({ isOpen, onClose, folderId, editingFile, onSaved }) {
     if (!form.first_name || !form.last_name)
       return toast.error("First and last name are required.");
     setSaving(true);
+    // Also normalized server-side (PatientFile's set*Attribute mutators) —
+    // done here too so the refresh after saving shows it correctly cased.
+    const payload = {
+      ...form,
+      first_name: toTitleCase(form.first_name),
+      last_name: toTitleCase(form.last_name),
+      place_of_origin: toTitleCase(form.place_of_origin),
+      tribe: toTitleCase(form.tribe),
+      occupation: toTitleCase(form.occupation),
+      religion: toTitleCase(form.religion),
+      next_of_kin_name: toTitleCase(form.next_of_kin_name),
+      next_of_kin_relationship: toTitleCase(form.next_of_kin_relationship),
+      allergies: toSentenceCase(form.allergies),
+      chronic_conditions: toSentenceCase(form.chronic_conditions),
+    };
     try {
       if (editingFile) {
-        await api.patch(`/folders/files/${editingFile.id}`, form);
+        await api.patch(`/folders/files/${editingFile.id}`, payload);
         toast.success("Patient file updated.");
       } else {
-        await api.post(`/folders/${folderId}/files`, form);
+        await api.post(`/folders/${folderId}/files`, payload);
         toast.success("Patient file created.");
       }
       setForm(EMPTY_PATIENT_FILE_FORM);
@@ -2171,7 +2368,7 @@ function PatientFileForm({ isOpen, onClose, folderId, editingFile, onSaved }) {
         className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-lg border border-slate-200 dark:border-slate-700 shadow-2xl z-10 max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-lg border border-slate-200 dark:border-slate-700 shadow-2xl z-10 max-h-[90vh] overflow-y-auto custom-scrollbar">
         <div className="flex justify-between items-center mb-6">
           <div>
             <h3 className="text-lg font-bold text-slate-900 dark:text-white">
@@ -2498,7 +2695,6 @@ function VisitRecordForm({
     diagnosis: "",
     notes: "",
     action_taken: "",
-    consultation_fee: "",
   });
 
   useEffect(() => {
@@ -2518,7 +2714,6 @@ function VisitRecordForm({
         diagnosis: editingRecord.diagnosis || "",
         notes: editingRecord.notes || "",
         action_taken: editingRecord.action_taken || "",
-        consultation_fee: editingRecord.consultation_fee || "",
       });
     }
   }, [editingRecord, isOpen]);
@@ -2531,40 +2726,25 @@ function VisitRecordForm({
     if (!form.chief_complaint)
       return toast.error("Chief complaint is required.");
     setSaving(true);
+    // Also normalized server-side (VisitRecord's set*Attribute mutators) —
+    // done here too so the refresh after saving shows it correctly cased.
+    const payload = {
+      ...form,
+      chief_complaint: toSentenceCase(form.chief_complaint),
+      physical_examination: toSentenceCase(form.physical_examination),
+      investigation: toSentenceCase(form.investigation),
+      test_results: toSentenceCase(form.test_results),
+      diagnosis: toSentenceCase(form.diagnosis),
+      notes: toSentenceCase(form.notes),
+      action_taken: toSentenceCase(form.action_taken),
+    };
     try {
-      // Replace the edit branch in handleSubmit:
       if (editingRecord) {
-        const res = await api.patch(
-          `/folders/visits/${editingRecord.id}`,
-          form
-        );
-        const { invoice, invoice_action } = res.data;
-
-        if (invoice_action === "created") {
-          toast.success(
-            `Record updated. Invoice of ${formatNGN(
-              invoice.total_amount
-            )} generated.`
-          );
-        } else if (invoice_action === "updated") {
-          toast.success(
-            `Record updated. Invoice amount changed to ${formatNGN(
-              invoice.total_amount
-            )}.`
-          );
-        } else {
-          toast.success("Visit record updated.");
-        }
+        await api.patch(`/folders/visits/${editingRecord.id}`, payload);
+        toast.success("Visit record updated successfully.");
       } else {
-        const res = await api.post(`/folders/files/${fileId}/visits`, form);
-        const invoice = res.data.invoice;
-        toast.success(
-          invoice
-            ? `Visit saved. Invoice of ${formatNGN(
-                invoice.total_amount
-              )} generated.`
-            : "Visit record saved."
-        );
+        await api.post(`/folders/files/${fileId}/visits`, payload);
+        toast.success("Visit record saved.");
       }
       setForm({
         visit_date: new Date().toISOString().split("T")[0],
@@ -2579,7 +2759,6 @@ function VisitRecordForm({
         diagnosis: "",
         notes: "",
         action_taken: "",
-        consultation_fee: "",
       });
       onSaved();
     } catch (err) {
@@ -2620,7 +2799,7 @@ function VisitRecordForm({
         {/* Scrollable form body */}
         <form
           onSubmit={handleSubmit}
-          className="overflow-y-auto p-6 space-y-6 flex-1"
+          className="overflow-y-auto custom-scrollbar p-6 space-y-6 flex-1"
         >
           {/* Visit date */}
           <FormField label="Visit Date">
@@ -2754,30 +2933,6 @@ function VisitRecordForm({
               onChange={(e) => set("action_taken", e.target.value)}
             />
           </FormField>
-
-          {/* Consultation fee — triggers invoice */}
-          <div className="bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 rounded-2xl p-4">
-            <FormField label="Hospital Bill (₦) — leave blank if not billing now">
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
-                  ₦
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0.00"
-                  className={`${inputClass} pl-8`}
-                  value={form.consultation_fee}
-                  onChange={(e) => set("consultation_fee", e.target.value)}
-                />
-              </div>
-            </FormField>
-            <p className="text-xs text-green-600 dark:text-green-400 mt-2">
-              Entering a fee will automatically generate an invoice that appears
-              in reception for payment.
-            </p>
-          </div>
         </form>
 
         {/* Sticky footer */}

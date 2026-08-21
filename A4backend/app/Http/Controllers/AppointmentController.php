@@ -12,9 +12,16 @@ class AppointmentController extends Controller
 {
     public function getDoctors()
     {
-        // Only get users with the doctor role
-        $doctors = User::where('role', 'doctor')
-            ->select('id', 'name', 'specialization')
+        // Doctors need admin approval to appear here. Admin accounts are
+        // included too — the hospital owner also practises as a doctor —
+        // and admin accounts have no approval step, so the status filter
+        // only applies to real doctor rows.
+        $doctors = User::where(fn($q) => $q
+            ->where(fn($d) => $d->where('role', 'doctor')->where('status', 'approved'))
+            ->orWhere('role', 'admin'))
+            ->select('id', 'name', 'specialization', 'role')
+            ->orderByRaw("role = 'admin'") // admin last, real doctors first
+            ->orderBy('name')
             ->get();
 
         return response()->json($doctors);

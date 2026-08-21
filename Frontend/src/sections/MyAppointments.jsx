@@ -3,6 +3,7 @@ import api from "../services/api";
 import { Calendar, Clock, User, ChevronRight, X, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const MyAppointments = () => {
   const [appointments, setAppointments] = useState([]);
@@ -10,6 +11,8 @@ const MyAppointments = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isRescheduleMode, setIsRescheduleMode] = useState(false);
   const [loading, setLoading] = useState(true);
+  // The appointment pending cancellation, or null when the dialog is closed.
+  const [apptToCancel, setApptToCancel] = useState(null);
 
   useEffect(() => {
     fetchAppointments();
@@ -31,17 +34,16 @@ const MyAppointments = () => {
     }
   };
 
-  const handleCancel = async (id) => {
-    if (!window.confirm("Are you sure you want to cancel this appointment?"))
-      return;
-
+  const handleCancel = async () => {
+    if (!apptToCancel) return;
     try {
       setLoading(true);
-      const res = await api.patch(`/appointments/${id}/cancel`);
+      await api.patch(`/appointments/${apptToCancel.id}/cancel`);
       toast.success("Appointment cancelled");
       fetchAppointments(); // Refreshing the list
     } catch (err) {
       toast.error("Could not cancel appointment");
+      throw err; // keeps the confirm dialog open on failure
     } finally {
       setLoading(false);
     }
@@ -153,7 +155,7 @@ const MyAppointments = () => {
 
                 {appt.status?.toLowerCase() !== "cancelled" && (
                   <button
-                    onClick={() => handleCancel(appt.id)}
+                    onClick={() => setApptToCancel(appt)}
                     className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl transition-colors cursor-pointer"
                     title="Cancel Appointment"
                   >
@@ -196,6 +198,24 @@ const MyAppointments = () => {
         appointment={selectedAppt}
         onConfirm={handleUpdateSchedule}
       />
+
+      <ConfirmDialog
+        isOpen={!!apptToCancel}
+        onClose={() => setApptToCancel(null)}
+        onConfirm={handleCancel}
+        title="Cancel this appointment?"
+        message={
+          apptToCancel
+            ? `Your appointment with Dr. ${apptToCancel.doctor?.name?.replace(
+                "Dr. ",
+                ""
+              )} will be cancelled. You'll need to book again if you change your mind.`
+            : ""
+        }
+        confirmLabel="Cancel Appointment"
+        cancelLabel="Keep It"
+        danger
+      />
     </div>
   );
 };
@@ -232,7 +252,7 @@ const AppointmentDetailModal = ({ isOpen, onClose, appointment, onReschedule }) 
       />
 
       <div
-        className={`absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-800 overflow-y-auto custom-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] shadow-2xl transform transition-transform duration-300 ease-in-out ${isOpen ? "translate-x-0" : "translate-x-full"} p-8`}
+        className={`absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-800 overflow-y-auto custom-scrollbar shadow-2xl transform transition-transform duration-300 ease-in-out ${isOpen ? "translate-x-0" : "translate-x-full"} p-8`}
       >
         <button
           onClick={onClose}

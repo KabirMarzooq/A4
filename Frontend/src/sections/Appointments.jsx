@@ -231,6 +231,12 @@ function SyncRequestsTab({ onPendingCountChange }) {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
 
+  // Deciding whether to take an online booking is the requested doctor's
+  // call — reception only gets a read-only view here (admin can still act,
+  // standing in for a doctor). See routes/api.php's sync-requests group.
+  const currentUser = JSON.parse(localStorage.getItem("a4_user") || "null");
+  const canAct = currentUser?.role?.toLowerCase() === "admin";
+
   const [isDeclineSidebarOpen, setIsDeclineSidebarOpen] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [declineReason, setDeclineReason] = useState("");
@@ -408,23 +414,32 @@ function SyncRequestsTab({ onPendingCountChange }) {
               </div>
 
               {r.status === "pending" ? (
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => handleConfirm(r)}
-                    className="flex-1 py-3 bg-teal-500 hover:bg-teal-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-teal-500/20"
-                  >
-                    <Check size={18} /> Confirm
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSelectedRequest(r);
-                      setIsDeclineSidebarOpen(true);
-                    }}
-                    className="flex-1 py-3 bg-slate-100 dark:bg-slate-700 hover:bg-red-50 dark:hover:bg-red-500/10 text-slate-600 dark:text-white hover:text-red-600 dark:hover:text-red-500 font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
-                  >
-                    <X size={18} /> Decline
-                  </button>
-                </div>
+                canAct ? (
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => handleConfirm(r)}
+                      className="flex-1 py-3 bg-teal-500 hover:bg-teal-600 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-teal-500/20"
+                    >
+                      <Check size={18} /> Confirm
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSelectedRequest(r);
+                        setIsDeclineSidebarOpen(true);
+                      }}
+                      className="flex-1 py-3 bg-slate-100 dark:bg-slate-700 hover:bg-red-50 dark:hover:bg-red-500/10 text-slate-600 dark:text-white hover:text-red-600 dark:hover:text-red-500 font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
+                    >
+                      <X size={18} /> Decline
+                    </button>
+                  </div>
+                ) : (
+                  <div className="w-full py-3 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold rounded-xl text-center text-xs border border-amber-100 dark:border-amber-500/20 uppercase tracking-widest">
+                    Waiting for{" "}
+                    {r.requested_doctor_name
+                      ? `Dr. ${r.requested_doctor_name}`
+                      : "the doctor"}
+                  </div>
+                )
               ) : r.status === "confirmed" ? (
                 <button
                   onClick={() => setFolderPrefill(r)}

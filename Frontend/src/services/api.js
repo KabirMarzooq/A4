@@ -85,8 +85,14 @@ api.interceptors.response.use(
                 processQueue(null, newToken);
                 isRefreshing = false;
 
-                // Retry the original request
-                return api(originalRequest);
+                // Retry the original request — awaited so that if it ALSO
+                // fails (e.g. the token refreshed fine but the account
+                // behind it was deleted/deactivated in the meantime — a
+                // refresh re-signs the token without re-checking the user
+                // still exists), that failure is caught below instead of
+                // silently rejecting past this function with a stale token
+                // left in localStorage.
+                return await api(originalRequest);
 
             } catch (refreshError) {
                 // If refresh failed, logout the user

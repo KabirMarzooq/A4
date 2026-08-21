@@ -18,13 +18,6 @@ import { toast } from "react-hot-toast";
 const inputClass =
   "w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 text-sm";
 
-const formatNGN = (amount) =>
-  new Intl.NumberFormat("en-NG", {
-    style: "currency",
-    currency: "NGN",
-    minimumFractionDigits: 2,
-  }).format(amount || 0);
-
 // ── MAIN DASHBOARD ─────────────────────────────────────────────────────────
 export default function LabDashboard() {
   const [activeTab, setActiveTab] = useState("pending");
@@ -155,7 +148,9 @@ export default function LabDashboard() {
                 {o.test_name}
               </p>
               <p className="text-xs text-slate-400 mt-0.5">
-                {o.patient_file?.first_name} {o.patient_file?.last_name}
+                {o.patient_file
+                  ? `${o.patient_file.first_name} ${o.patient_file.last_name}`
+                  : `${o.patient_name} (Walk-in)`}
               </p>
               <p className="text-xs text-slate-400 mt-2">
                 {o.ordered_by ? `Ordered by Dr. ${o.ordered_by.name}` : "Walk-in"}
@@ -196,7 +191,7 @@ function OrderDetail({ orderId, onBack }) {
     try {
       const res = await api.get(`/lab-orders/${orderId}`);
       setOrder(res.data);
-      setSendEmail(res.data.patient_file?.email || "");
+      setSendEmail(res.data.patient_file?.email || res.data.patient_email || "");
     } catch {
       toast.error("Failed to load order.");
     } finally {
@@ -275,8 +270,9 @@ function OrderDetail({ orderId, onBack }) {
               {order.test_name}
             </h2>
             <p className="text-slate-500 text-sm mt-0.5">
-              {order.patient_file?.first_name} {order.patient_file?.last_name}{" "}
-              · {order.patient_file?.folder?.folder_name}
+              {order.patient_file
+                ? `${order.patient_file.first_name} ${order.patient_file.last_name} · ${order.patient_file.folder?.folder_name}`
+                : `${order.patient_name} (Walk-in)`}
             </p>
           </div>
           <span
@@ -292,21 +288,13 @@ function OrderDetail({ orderId, onBack }) {
           </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mb-4">
+        <div className="mb-4">
           <div className="bg-slate-50 dark:bg-slate-900/40 rounded-2xl p-3 border border-slate-100 dark:border-slate-700">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
               Ordered By
             </p>
             <p className="text-sm font-bold text-slate-800 dark:text-white">
               {order.ordered_by ? `Dr. ${order.ordered_by.name}` : "Walk-in"}
-            </p>
-          </div>
-          <div className="bg-slate-50 dark:bg-slate-900/40 rounded-2xl p-3 border border-slate-100 dark:border-slate-700">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              Price
-            </p>
-            <p className="text-sm font-bold text-teal-600">
-              {formatNGN(order.price)}
             </p>
           </div>
         </div>
@@ -341,7 +329,7 @@ function OrderDetail({ orderId, onBack }) {
             </div>
             <div>
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">
-                Result File (PDF or photo)
+                Result File
               </label>
               <input
                 type="file"
@@ -349,6 +337,9 @@ function OrderDetail({ orderId, onBack }) {
                 className={inputClass}
                 onChange={(e) => setFile(e.target.files[0])}
               />
+              <p className="text-xs text-slate-400 mt-1.5">
+                Accepts PDF, JPG, or PNG — max 10MB.
+              </p>
             </div>
             <button
               type="submit"
@@ -425,8 +416,21 @@ function NewOrderModal({ isOpen, onClose, onCreated }) {
   const [selectedFolder, setSelectedFolder] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
   const [testCatalog, setTestCatalog] = useState([]);
-  const [lines, setLines] = useState([{ lab_test_id: "", test_name: "", price: "" }]);
+  const [lines, setLines] = useState([{ lab_test_id: "", test_name: "" }]);
   const [saving, setSaving] = useState(false);
+  const [showAddTest, setShowAddTest] = useState(false);
+  const [newTest, setNewTest] = useState({ name: "", category: "", price: "" });
+  const [addingTest, setAddingTest] = useState(false);
+  // A walk-in with no existing patient record at all — no folder/file gets
+  // created for them; the order just carries this snapshot directly (see
+  // LabOrderController::storeStandalone). Registering a proper folder is a
+  // reception/Medical Records job now, not lab's.
+  const [showStandalone, setShowStandalone] = useState(false);
+  const [standalonePatient, setStandalonePatient] = useState({
+    patient_name: "",
+    patient_email: "",
+    patient_phone: "",
+  });
 
   useEffect(() => {
     if (!isOpen) {
@@ -434,11 +438,22 @@ function NewOrderModal({ isOpen, onClose, onCreated }) {
       setFolders([]);
       setSelectedFolder(null);
       setSelectedFile(null);
-      setLines([{ lab_test_id: "", test_name: "", price: "" }]);
+      setLines([{ lab_test_id: "", test_name: "" }]);
+      setShowStandalone(false);
+      setStandalonePatient({ patient_name: "", patient_email: "", patient_phone: "" });
       return;
     }
     api.get("/lab-tests").then((res) => setTestCatalog(res.data || []));
   }, [isOpen]);
+
+  const handleUseStandalone = () => {
+    if (!standalonePatient.patient_name.trim()) {
+      return toast.error("Patient name is required.");
+    }
+    // Reuse the same "Tests" step as a folder-attached order — selectedFile
+    // just stays null, which handleSubmit below treats as "standalone".
+    setSelectedFile({ standalone: true });
+  };
 
   useEffect(() => {
     if (!search) return setFolders([]);
@@ -460,18 +475,24 @@ function NewOrderModal({ isOpen, onClose, onCreated }) {
       next[i] = {
         lab_test_id: testId,
         test_name: test?.name || "",
-        price: test?.price || "",
       };
       return next;
     });
   };
 
   const handleSubmit = async () => {
-    const validLines = lines.filter((l) => l.test_name && l.price);
+    const validLines = lines.filter((l) => l.test_name);
     if (validLines.length === 0) return toast.error("Add at least one test.");
     setSaving(true);
     try {
-      await api.post(`/lab-orders/files/${selectedFile.id}`, { tests: validLines });
+      if (selectedFile.standalone) {
+        await api.post("/lab-orders/standalone", {
+          ...standalonePatient,
+          tests: validLines,
+        });
+      } else {
+        await api.post(`/lab-orders/files/${selectedFile.id}`, { tests: validLines });
+      }
       toast.success(`${validLines.length} test(s) ordered.`);
       onCreated();
     } catch (err) {
@@ -481,12 +502,34 @@ function NewOrderModal({ isOpen, onClose, onCreated }) {
     }
   };
 
+  // Lets lab staff grow the test catalog on the spot (backend CRUD already
+  // existed at role:doctor,lab,admin — nothing in the frontend called it,
+  // which is why the catalog started out empty; see LabTestSeeder for the
+  // starter set).
+  const handleAddTest = async () => {
+    if (!newTest.name || !newTest.price) {
+      return toast.error("Test name and price are required.");
+    }
+    setAddingTest(true);
+    try {
+      const res = await api.post("/lab-tests", newTest);
+      setTestCatalog((prev) => [...prev, res.data].sort((a, b) => a.name.localeCompare(b.name)));
+      toast.success("Test type added.");
+      setNewTest({ name: "", category: "", price: "" });
+      setShowAddTest(false);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to add test type.");
+    } finally {
+      setAddingTest(false);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-lg border border-slate-200 dark:border-slate-700 shadow-2xl z-10 max-h-[85vh] overflow-y-auto">
+      <div className="relative bg-white dark:bg-slate-800 rounded-3xl p-6 w-full max-w-lg border border-slate-200 dark:border-slate-700 shadow-2xl z-10 max-h-[85vh] overflow-y-auto custom-scrollbar">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-lg font-bold text-slate-900 dark:text-white">New Walk-in Order</h3>
           <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full cursor-pointer">
@@ -524,10 +567,71 @@ function NewOrderModal({ isOpen, onClose, onCreated }) {
                     </div>
                   </button>
                 ))}
-                {search && folders.length === 0 && (
-                  <p className="text-sm text-slate-400 text-center py-4">
-                    No folder found. Register the patient in Medical Records first.
-                  </p>
+                {search && folders.length === 0 && !showStandalone && (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-slate-400 mb-3">
+                      No folder found for "{search}".
+                    </p>
+                    <button
+                      onClick={() => {
+                        setStandalonePatient((p) => ({ ...p, patient_name: search }));
+                        setShowStandalone(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white text-xs font-bold rounded-xl cursor-pointer"
+                    >
+                      <Plus size={14} /> Order for a Walk-in (No Folder)
+                    </button>
+                  </div>
+                )}
+                {showStandalone && (
+                  <div className="bg-slate-50 dark:bg-slate-900/40 rounded-2xl p-4 space-y-3">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                      Walk-in Details — no patient folder needed
+                    </p>
+                    <input
+                      type="text"
+                      placeholder="Patient name *"
+                      className={inputClass}
+                      value={standalonePatient.patient_name}
+                      onChange={(e) =>
+                        setStandalonePatient((p) => ({ ...p, patient_name: e.target.value }))
+                      }
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Phone (optional)"
+                        className={inputClass}
+                        value={standalonePatient.patient_phone}
+                        onChange={(e) =>
+                          setStandalonePatient((p) => ({ ...p, patient_phone: e.target.value }))
+                        }
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email (optional)"
+                        className={inputClass}
+                        value={standalonePatient.patient_email}
+                        onChange={(e) =>
+                          setStandalonePatient((p) => ({ ...p, patient_email: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setShowStandalone(false)}
+                        className="flex-1 py-2.5 text-slate-500 text-xs font-bold rounded-xl cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleUseStandalone}
+                        className="flex-1 py-2.5 bg-teal-500 hover:bg-teal-600 text-white text-xs font-bold rounded-xl cursor-pointer"
+                      >
+                        Continue to Tests
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             ) : (
@@ -561,10 +665,15 @@ function NewOrderModal({ isOpen, onClose, onCreated }) {
           <div>
             <div className="flex items-center justify-between bg-teal-50 dark:bg-teal-500/10 rounded-xl px-4 py-3 mb-4">
               <p className="text-sm font-bold text-teal-700 dark:text-teal-400">
-                {selectedFile.first_name} {selectedFile.last_name}
+                {selectedFile.standalone
+                  ? `${standalonePatient.patient_name} (Walk-in)`
+                  : `${selectedFile.first_name} ${selectedFile.last_name}`}
               </p>
               <button
-                onClick={() => setSelectedFile(null)}
+                onClick={() => {
+                  setSelectedFile(null);
+                  setShowStandalone(false);
+                }}
                 className="text-xs text-teal-600 font-bold cursor-pointer"
               >
                 Change
@@ -583,7 +692,8 @@ function NewOrderModal({ isOpen, onClose, onCreated }) {
                     <option value="">Select a test...</option>
                     {testCatalog.map((t) => (
                       <option key={t.id} value={t.id}>
-                        {t.name} — {formatNGN(t.price)}
+                        {t.name}
+                        {t.category ? ` — ${t.category}` : ""}
                       </option>
                     ))}
                   </select>
@@ -600,11 +710,64 @@ function NewOrderModal({ isOpen, onClose, onCreated }) {
             </div>
 
             <button
-              onClick={() => setLines((prev) => [...prev, { lab_test_id: "", test_name: "", price: "" }])}
-              className="flex items-center gap-1 text-teal-600 text-xs font-bold mb-5 cursor-pointer"
+              onClick={() => setLines((prev) => [...prev, { lab_test_id: "", test_name: "" }])}
+              className="flex items-center gap-1 text-teal-600 text-xs font-bold mb-3 cursor-pointer"
             >
               <Plus size={14} /> Add another test
             </button>
+
+            {!showAddTest ? (
+              <button
+                onClick={() => setShowAddTest(true)}
+                className="text-xs text-slate-400 hover:text-teal-600 font-bold mb-5 cursor-pointer block"
+              >
+                Test not in the list? Add a new test type
+              </button>
+            ) : (
+              <div className="bg-slate-50 dark:bg-slate-900/40 rounded-2xl p-4 space-y-3 mb-5">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  New Test Type
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Test name"
+                    className={`${inputClass} col-span-2`}
+                    value={newTest.name}
+                    onChange={(e) => setNewTest((t) => ({ ...t, name: e.target.value }))}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Category (optional)"
+                    className={inputClass}
+                    value={newTest.category}
+                    onChange={(e) => setNewTest((t) => ({ ...t, category: e.target.value }))}
+                  />
+                  <input
+                    type="number"
+                    placeholder="Price"
+                    className={inputClass}
+                    value={newTest.price}
+                    onChange={(e) => setNewTest((t) => ({ ...t, price: e.target.value }))}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowAddTest(false)}
+                    className="flex-1 py-2.5 text-slate-500 text-xs font-bold rounded-xl cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAddTest}
+                    disabled={addingTest}
+                    className="flex-1 py-2.5 bg-teal-500 hover:bg-teal-600 disabled:opacity-60 text-white text-xs font-bold rounded-xl cursor-pointer"
+                  >
+                    {addingTest ? "Adding..." : "Add Test Type"}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <button
               onClick={handleSubmit}

@@ -222,7 +222,7 @@ export default function Inventory() {
         </div>
       ) : (
         <div className="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto custom-scrollbar">
             <table className="w-full text-left">
               <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
                 <tr>
@@ -483,7 +483,7 @@ function DrugForm({ isOpen, onClose, editingDrug, onSaved }) {
         onClick={onClose}
       />
       <div
-        className={`absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-800 p-8 transform transition-transform duration-300 border-l border-slate-200 dark:border-slate-700 overflow-y-auto ${
+        className={`absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-800 p-8 transform transition-transform duration-300 border-l border-slate-200 dark:border-slate-700 overflow-y-auto custom-scrollbar ${
           isOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >

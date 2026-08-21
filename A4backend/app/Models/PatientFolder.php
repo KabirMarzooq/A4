@@ -2,6 +2,7 @@
 // ── PatientFolder.php ─────────────────────────────────────────────────────────
 namespace App\Models;
 
+use App\Support\TextCase;
 use Illuminate\Database\Eloquent\Model;
 
 class PatientFolder extends Model
@@ -13,6 +14,11 @@ class PatientFolder extends Model
         'address',
         'created_by',
     ];
+
+    public function setFolderNameAttribute($value): void
+    {
+        $this->attributes['folder_name'] = TextCase::title($value);
+    }
 
     public function files()
     {

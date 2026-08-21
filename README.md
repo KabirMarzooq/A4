@@ -92,28 +92,33 @@ Every clinical encounter — a general visit, a dialysis session, a round-note d
 
 ### 🩺 Patient (online, cloud-facing)
 
-- Register/log in (email+password or Google), book/reschedule/cancel appointments with a doctor
+- Register/log in (email+password or Google), book/reschedule/cancel appointments with a doctor — only doctors the admin has already approved appear in the booking list
 - View own appointments, prescriptions, bills and receipts
 - Pay online via Paystack (currently **disabled** by default — see [Payments](#-payments)) or at the hospital desk
 - Request a copy of their medical report (admin-approved)
 
 ### 👨‍⚕️ Doctor
 
-- Accept/decline the incoming online appointment queue
-- Full patient-folder access: create/edit visit records, view history, assign/transfer patients to themselves
+- Accept/decline the incoming online appointment queue, plus a same-shaped "Online Bookings" queue on the Schedule page for cloud-synced requests addressed to them by name (see [Offline sync](#offline-sync))
+- Patient-folder access is **scoped to their own patients** — a file they created, or one currently assigned to them (`current_doctor_id`); an unassigned or another doctor's file is invisible, not just hidden in the UI (enforced server-side on every read/write route)
+- Create/edit visit records, view history, assign/transfer patients to themselves
 - Log dialysis sessions in a dedicated register-style view (auto-incrementing session number, all the fields a hemodialysis unit tracks — access type, machine, pre/post BP & weight, UF, duration, complications)
 - Admit a patient (ward, reason) and discharge them later — every visit record logged during that stay auto-links to the admission with no extra step
-- Order lab tests for a patient directly from their file
+- Order lab tests for a patient directly from their file — no price entered; billing for the test is reception's job, not the doctor's (see [Billing](#billing))
 - Write prescriptions against the drug inventory
 - View their own revenue dashboard
 
+Visit records and dialysis sessions are **purely clinical now** — there's no consultation-fee field on either form, and neither generates an invoice. An admin account switched into the Doctor view (see below) is treated as a doctor everywhere a doctor can be picked (booking, patient assignment) but stays **unscoped** — it sees every patient, not just its own.
+
 ### 📋 Receptionist
 
-- Register walk-in families/patients (the same "New Folder" flow whether it's a genuine walk-in or a confirmed online booking)
-- Assign/transfer patients between doctors
-- Record cash/POS payments, view all bills and receipts
+- Register walk-in families/patients (the same "New Folder" flow whether it's a genuine walk-in or a confirmed online booking) — demographic details and billing only; clinical content (diagnosis, notes, exam findings, investigations) is stripped from the API response and hidden in the UI, so a receptionist can open a patient's file to bill them without seeing what a doctor wrote. The entire Visit History tab strip (Overview/Dialysis/Prescriptions/Lab Results) is hidden for this role, not just field-stripped — reprinting a prescription happens from the dedicated Prescriptions page instead
+- Front-desk patient logistics: assign a walk-in to a doctor (or transfer between doctors), and admit/discharge — none of which expose clinical content, so they sit outside the doctor-only clinical routes
+- **Create Invoice**: write a bill directly for anything that isn't a lab order or old-style visit-record fee — online or walk-in patient, free-form line items (`POST /reception/bills`)
+- Record cash/POS payments (full or **partial** — an invoice can be `partially_paid` with a running balance), view all bills and receipts
 - View the full cross-doctor schedule
-- Review the incoming online-booking sync queue and confirm or decline each request
+- Review the incoming online-booking sync queue **read-only** — confirming or declining is the addressed doctor's (or admin's) call, not reception's; reception still creates the patient folder once a request is confirmed
+- No longer runs the pharmacy counter-sales desk (moved to Pharmacy/Admin only) — defaults to the Schedules tab on login instead of Sales
 
 ### 💊 Pharmacy
 
@@ -124,17 +129,20 @@ Every clinical encounter — a general visit, a dialysis session, a round-note d
 ### 🧪 Lab
 
 - A dedicated Lab Dashboard: a pending queue and a completed/history view
-- Receive orders either from a doctor (placed from inside a patient's file) or start one directly for a lab-only walk-in
-- Mark an order in-progress, then record a result — a typed summary, an uploaded file (PDF/image), or both
+- Receive orders either from a doctor (placed from inside a patient's file) or start one directly — for an existing patient file, or as a **standalone walk-in order with no patient folder at all** (just a name, and optional phone/email snapshotted onto the order itself; `patient_file_id` is nullable)
+- No pricing anywhere in the ordering flow — lab orders a test, reception bills it separately. The `lab_tests` catalog still carries a price per test, kept as reception's future pricing reference, not something lab enters
+- Mark an order in-progress, then record a result — a typed summary, an uploaded PDF/JPG/PNG file (max 10MB), or both — the accepted file types are labeled in the UI
 - Email the result straight to the patient once complete (WhatsApp delivery is a planned follow-up, not built yet)
-- A small price catalog (`lab_tests`) drives autocomplete + billing, same pattern as the drug catalog
+- Completed orders for a patient with a folder surface in that patient's file under a **Lab Results** tab — hidden entirely when there's nothing completed yet, same pattern as Dialysis
 
 ### 👔 Admin
 
 - Full user management: approve pending staff accounts, change roles, deactivate/delete
 - Browse the full, searchable system-wide audit log
 - Approve/reject medical report requests
-- Everything every other staff role can do, **plus** a dashboard role switcher: an admin account can toggle into the Doctor view (their own nav, their own doctor-scoped API access) without that ever granting an ordinary doctor account any admin access — it's one-directional, gated to the literal `admin` role only.
+- A **Medical Records** tab, unscoped — sees every patient's full clinical content, same as a doctor would, without the per-doctor ownership restriction
+- A "Total Revenue Today" card at the top of Bills & Receipts — every *payment* collected that day (not every invoice created that day), broken down by invoice type; counted off `Payment` rows so a same-day partial payment on an older invoice still counts, only rendered for the admin role even though that page is shared with Receptionist/Pharmacy
+- Everything every other staff role can do, **plus** a dashboard role switcher: an admin account can toggle into the Doctor view (their own nav) without that ever granting an ordinary doctor account any admin access — it's one-directional, gated to the literal `admin` role only. While switched, the account displays with the "Dr." prefix everywhere a real doctor's name would appear, and appears (labeled "Hospital Administrator") in every doctor picker — booking, patient assignment — standing in as a doctor there too.
 
 ### 🌐 System-wide
 
@@ -280,15 +288,23 @@ A4/
 
 ### Patient records: folders → files → visit records
 
-A `PatientFolder` (family) contains one or more `PatientFile`s (individuals). Every clinical encounter is a `VisitRecord` against a file — a general visit, a dialysis session (`visit_type = dialysis`, its own register-style tab, session numbers computed server-side and never client-editable), or a round-note during an inpatient stay (auto-linked to the active `Admission` with zero extra doctor action). Lab orders (`LabOrder`) hang off a `PatientFile` too, optionally linked to the visit record they were ordered from.
+A `PatientFolder` (family) contains one or more `PatientFile`s (individuals). Every clinical encounter is a `VisitRecord` against a file — a general visit, a dialysis session (`visit_type = dialysis`, its own register-style tab, session numbers computed server-side and never client-editable), or a round-note during an inpatient stay (auto-linked to the active `Admission` with zero extra doctor action). Lab orders (`LabOrder`) hang off a `PatientFile` too, optionally linked to the visit record they were ordered from — or hang off nothing at all for a standalone lab walk-in with no folder.
+
+Names and free-text clinical fields are normalized on write regardless of how they get there — form, API client, `tinker` — via Eloquent mutators (`App\Support\TextCase`) on `PatientFolder`/`PatientFile`/`VisitRecord`: proper nouns (names, places) become Title Case, narrative text (complaints, notes, diagnoses) gets sentence-case applied only to the first letter of each sentence so medical abbreviations (BP, HIV, IV) survive untouched. The frontend forms apply the same normalization at submit time too, purely so staff see the corrected casing immediately rather than waiting on a refetch — the backend mutator is what actually guarantees consistency.
 
 ### Billing
 
-Billing is per-encounter, not a fixed platform fee: a doctor enters whatever the consultation actually cost on the visit record itself (or a lab order's price, pulled from the lab test catalog), which generates an `Invoice` the receptionist can then record a cash/POS payment against — or the patient can pay online if Paystack is enabled. There's no separate "admission" or "dialysis" charge type; a stay or a dialysis program bills exactly the same way every individual visit within it does.
+Billing is reception/admin's job, not the clinical staff's — doctors and lab no longer generate invoices at all. Reception writes an `Invoice` directly against an online or walk-in patient with free-form line items (**Create Invoice**, `POST /reception/bills`); the patient then pays at the desk (cash/POS/transfer) or online if Paystack is enabled. There's no separate "admission" or "dialysis" or "lab test" charge type — everything not created some other way funnels through this one manual-invoice path.
+
+**Partial payments** are fully supported: `invoices.amount_paid` tracks a running total across every successful `Payment` against that invoice, and `status` becomes `partially_paid` (not `paid`) once `amount_paid` is more than zero but less than `total_amount`. Recording a cash payment accepts an optional `amount` — omit it to pay the full remaining balance, or specify less to leave a balance owing. A card payment (Paystack) always charges the full remaining balance in one go, since Paystack itself has no concept of a partial charge; the amount charged is computed server-side from the invoice's actual balance, not blindly from `total_amount`. Each payment — full or partial — gets its own `Receipt`.
+
+Receipts print/download as a self-contained, inline-styled quarter-A4 (~105×148mm) document via the browser's native print dialog — no server-side PDF renderer is involved. The admin "Total Revenue Today" widget sums every `Payment` collected that day (not every invoice created), so it correctly reflects same-day partial payments on older invoices.
 
 ### Admissions
 
 `Admission` tracks ward, admission/discharge dates, and status (`admitted`/`discharged`). A patient's file shows a live "Admitted — Ward: X — Day N" badge while active. Discharging just closes out the admission record — any billing that happened during the stay already went through the normal per-visit flow above.
+
+Admitting and discharging happen from inside a patient's file, but the hospital-wide **Admissions** page (`GET /admissions`, nav item for doctor/receptionist/admin) is the ward board: who is currently admitted, which ward, under which doctor, and how many days in — filterable by current/discharged and searchable by patient.
 
 ### Offline sync
 
@@ -313,13 +329,15 @@ All endpoints are under `/api`, JWT-authenticated (`Authorization: Bearer {token
 | `/patient/*` | Patient | Own prescriptions, bills, receipts, Paystack init/verify, report requests |
 | `/admin/*` | Admin only | User management, system logs, report-request approvals |
 | `/schedules` | Receptionist, Admin | Cross-doctor schedule view |
-| `/reception/*` | Receptionist, Admin, Pharmacy | Bills/receipts, cash & card payment recording |
-| `/pharmacy/sales/*` | Pharmacy, Admin, Receptionist | Counter-sales register |
+| `/reception/*` | GET/cash-payment/card-init: Receptionist, Admin, Pharmacy. `POST /reception/bills` (Create Invoice): Receptionist, Admin only | Bills/receipts, cash & card payment recording (partial-payment aware), manual invoice creation |
+| `/pharmacy/sales/*` | Pharmacy, Admin | Counter-sales register (receptionist no longer runs this desk) |
 | `/pharmacy/drugs` | Pharmacy, Admin, Doctor | Drug inventory CRUD |
-| `/folders/*` | Doctor, Receptionist, Admin (read-only subset also **Lab**) | Family folders, patient files, visit records, transfers, admissions |
-| `/lab-tests`, `/lab-orders/*` | Doctor, Lab, Admin | Test catalog, order lifecycle, results, email delivery |
+| `/folders/*` | Split by sensitivity: clinical writes (visit records) are Doctor/Admin only, and doctor access is further **scoped to their own patients** server-side; intake, assignment/transfer and admissions also allow Receptionist; read lookup and intake also allow **Lab** | Family folders, patient files, visit records, transfers, admissions |
+| `/admissions` | Doctor, Receptionist, Admin | Hospital-wide ward board (who is admitted right now) |
+| `/lab-tests`, `/lab-orders/*` | Doctor, Lab, Admin | Test catalog, order lifecycle (including `/lab-orders/standalone` for a folder-less walk-in), results, email delivery — no pricing on any order endpoint |
 | `/sync/*` | Machine-to-machine (`X-Sync-Key` header, not JWT) | Cloud-side pull/push endpoints for the offline sync bridge |
-| `/sync-requests/*` | Receptionist, Admin | Local-side incoming online-booking queue |
+| `/sync-requests/*` | View: Receptionist, Admin, Doctor (doctor sees only requests addressed to them by name). Confirm/decline: Doctor, Admin only | Local-side incoming online-booking queue — deciding whether to take the booking is the doctor's call, not reception's |
+| `/notifications/*` | Any authenticated role | Per-section unread summary + `POST /notifications/seen` to persist that a section was checked, so a cleared dot stays cleared |
 | `/webhook/paystack` | Public (Paystack's servers) | Payment confirmation webhook |
 | `/contact`, `/report-issue` | Public / authenticated | Contact form, bug reports |
 
@@ -331,19 +349,25 @@ Six roles: `patient`, `doctor`, `receptionist`, `pharmacy`, `lab`, `admin`. Pati
 
 | Capability | Patient | Doctor | Receptionist | Pharmacy | Lab | Admin |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: |
-| Book/view own appointments | ✅ | — | — | — | — | — |
-| Accept/decline appointment queue | — | ✅ | — | — | — | ✅ (via role switch) |
-| Patient folders — read/write | — | ✅ | ✅ | — | — | ✅ |
-| Patient folders — read only | — | — | — | — | ✅ | — |
-| Dialysis / admissions | — | ✅ | — | — | — | ✅ (via role switch) |
-| Order lab tests | — | ✅ | — | — | — | ✅ |
+| Book/view own appointments (approved doctors only) | ✅ | — | — | — | — | — |
+| Accept/decline appointment queue (local + online-sync) | — | ✅ | — | — | — | ✅ (via role switch) |
+| Patient folders — clinical read/write (diagnosis, notes, visit records) | — | ✅ own patients only | — | — | — | ✅ unscoped |
+| Patient folders — read lookup (search, demographics, billing history) | — | ✅ own patients only | ✅ | — | ✅ | ✅ unscoped |
+| Patient folders — create new patient intake (demographics only) | — | ✅ | ✅ | — | ✅ | ✅ |
+| Dialysis sessions (clinical) | — | ✅ own patients only | — | — | — | ✅ unscoped |
+| Admissions / doctor assignment & transfers | — | ✅ | ✅ | — | — | ✅ |
+| Order lab tests (no pricing) | — | ✅ own patients only | — | — | ✅ (incl. folder-less walk-in) | ✅ |
 | Fulfil lab orders, email results | — | — | — | — | ✅ | ✅ |
 | Prescriptions — write | — | ✅ | — | — | — | — |
 | Prescriptions — dispense | — | — | — | ✅ | — | — |
-| Drug inventory | — | view | — | ✅ | — | ✅ |
-| Counter sales register | — | — | ✅ | ✅ | — | ✅ |
-| Cash/card payment recording | — | — | ✅ | ✅ (desk) | — | ✅ |
-| Sync requests queue | — | — | ✅ | — | — | ✅ |
+| Drug inventory — manage | — | view | — | ✅ | — | ✅ |
+| Drug inventory — read (for counter sales) | — | — | — | ✅ | — | ✅ |
+| Counter sales register | — | — | — | ✅ | — | ✅ |
+| Create Invoice (manual bill, any patient) | — | — | ✅ | — | — | ✅ |
+| Cash/card payment recording (full or partial) | — | — | ✅ | ✅ (desk) | — | ✅ |
+| Sync requests — view queue | — | ✅ own requests only | ✅ | — | — | ✅ |
+| Sync requests — confirm/decline | — | ✅ own requests only | — | — | — | ✅ |
+| Total revenue today dashboard | — | — | — | — | — | ✅ |
 | User management, system logs | — | — | — | — | — | ✅ |
 
 ---
@@ -354,8 +378,9 @@ Six roles: `patient`, `doctor`, `receptionist`, `pharmacy`, `lab`, `admin`. Pati
 - **Named rate limiters** on the sensitive endpoints specifically — `login`, `register`, `forgot-password`, `reset-password`, `contact-form` — plus a blanket per-user/per-IP limit on every other API route as defense-in-depth
 - **CORS**: origin allowlist, configurable via `CORS_ALLOWED_ORIGINS` (see [Architecture](#-architecture))
 - **Offline sync** endpoints are authenticated by a separate shared-secret header (`X-Sync-Key`), compared with `hash_equals()` — there's no logged-in user on either end of that machine-to-machine call
-- **Least-privilege data access**: e.g. the Lab role gets read-only patient lookup, not write access to clinical records; Pharmacy is excluded from the folders/visit-records API entirely
-- Passwords hashed via bcrypt (`BCRYPT_ROUNDS`, configurable)
+- **Least-privilege data access**: e.g. Lab and Receptionist can look up a patient and create a new intake (demographics only) but never write clinical content; Receptionist's read access is additionally field-stripped server-side so diagnosis/notes/exam findings never leave the API for that role, not just hidden in the UI; Pharmacy is excluded from the folders/visit-records API entirely; a doctor's clinical read/write is further scoped server-side to patients they created or are currently assigned to — an unassigned or another doctor's file 403s, it isn't just absent from the list
+- Passwords hashed via bcrypt (`BCRYPT_ROUNDS`, configurable) — note the cost factor is baked into each hash at creation time, so lowering `BCRYPT_ROUNDS` only speeds up newly-created accounts, not existing ones, unless those users' passwords are reset
+- **Regulatory**: the hospital's CAC registration number (`RC 2635840`) is printed on every receipt, invoice, prescription, and medical report
 
 No field-level encryption-at-rest is implemented for clinical data — protection currently relies on access control, not encryption. Worth knowing if this is being evaluated against a specific compliance standard.
 

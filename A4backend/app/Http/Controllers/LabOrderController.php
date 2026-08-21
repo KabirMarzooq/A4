@@ -2,13 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Invoice;
-use App\Models\InvoiceItem;
 use App\Models\LabOrder;
 use App\Models\PatientFile;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 
@@ -65,12 +62,14 @@ class LabOrderController extends Controller
     /**
      * Create one or more test orders in a batch — used both when a doctor
      * orders tests for a patient they're seeing, and when lab staff start
-     * an order directly for a walk-in. One invoice covers the whole batch;
-     * each test gets its own row so they can progress independently.
+     * an order directly for a walk-in with an existing file. No invoice or
+     * price here any more — lab orders a test, reception bills it
+     * separately (ReceptionBillingController::storeInvoice). The lab_tests
+     * catalog price still exists as reception's future pricing reference.
      */
     public function store(Request $request, $fileId)
     {
-        $file = PatientFile::findOrFail($fileId);
+        PatientFile::findOrFail($fileId);
 
         $request->validate([
             'is_doctor_order'      => 'nullable|boolean',
@@ -78,56 +77,50 @@ class LabOrderController extends Controller
             'tests'                => 'required|array|min:1',
             'tests.*.lab_test_id'  => 'nullable|exists:lab_tests,id',
             'tests.*.test_name'    => 'required|string|max:150',
-            'tests.*.price'        => 'required|numeric|min:0',
         ]);
 
-        return DB::transaction(function () use ($request, $fileId, $file) {
-            $subtotal = collect($request->tests)->sum('price');
+        $orders = collect($request->tests)->map(fn($test) => LabOrder::create([
+            'patient_file_id' => $fileId,
+            'visit_record_id' => $request->visit_record_id,
+            'lab_test_id'     => $test['lab_test_id'] ?? null,
+            'test_name'       => $test['test_name'],
+            // Not inferred from Auth::user()->role — an admin ordering
+            // while switched into "Doctor" view still has role=admin on
+            // the JWT, so this must come from an explicit flag set by the
+            // calling frontend form instead.
+            'ordered_by'      => $request->boolean('is_doctor_order') ? Auth::id() : null,
+            'status'          => 'pending',
+        ]));
 
-            $invoice = Invoice::create([
-                'invoice_number'  => Invoice::generateInvoiceNumber(),
-                'patient_file_id' => $fileId,
-                'doctor_id'       => $request->boolean('is_doctor_order') ? Auth::id() : null,
-                'type'            => 'lab_test',
-                'subtotal'        => $subtotal,
-                'service_charge'  => 0,
-                'total_amount'    => $subtotal,
-                'currency'        => 'NGN',
-                'status'          => 'unpaid',
-                'due_date'        => now()->addDays(1),
-            ]);
+        return response()->json(['orders' => $orders], 201);
+    }
 
-            $orders = [];
-            foreach ($request->tests as $test) {
-                InvoiceItem::create([
-                    'invoice_id'  => $invoice->id,
-                    'description' => $test['test_name'],
-                    'quantity'    => 1,
-                    'unit_price'  => $test['price'],
-                    'total_price' => $test['price'],
-                ]);
+    /**
+     * Same as store(), but for a walk-in with no patient file at all — lab
+     * staff shouldn't have to create a full folder+file just to run one
+     * test for someone who isn't otherwise a patient here.
+     */
+    public function storeStandalone(Request $request)
+    {
+        $request->validate([
+            'patient_name'         => 'required|string|max:150',
+            'patient_email'        => 'nullable|email|max:150',
+            'patient_phone'        => 'nullable|string|max:20',
+            'tests'                => 'required|array|min:1',
+            'tests.*.lab_test_id'  => 'nullable|exists:lab_tests,id',
+            'tests.*.test_name'    => 'required|string|max:150',
+        ]);
 
-                $orders[] = LabOrder::create([
-                    'patient_file_id' => $fileId,
-                    'visit_record_id' => $request->visit_record_id,
-                    'lab_test_id'     => $test['lab_test_id'] ?? null,
-                    'test_name'       => $test['test_name'],
-                    'price'           => $test['price'],
-                    // Not inferred from Auth::user()->role — an admin
-                    // ordering while switched into "Doctor" view still has
-                    // role=admin on the JWT, so this must come from an
-                    // explicit flag set by the calling frontend form instead.
-                    'ordered_by'      => $request->boolean('is_doctor_order') ? Auth::id() : null,
-                    'invoice_id'      => $invoice->id,
-                    'status'          => 'pending',
-                ]);
-            }
+        $orders = collect($request->tests)->map(fn($test) => LabOrder::create([
+            'patient_name'  => $request->patient_name,
+            'patient_email' => $request->patient_email,
+            'patient_phone' => $request->patient_phone,
+            'lab_test_id'   => $test['lab_test_id'] ?? null,
+            'test_name'     => $test['test_name'],
+            'status'        => 'pending',
+        ]));
 
-            return response()->json([
-                'orders'  => $orders,
-                'invoice' => $invoice,
-            ], 201);
-        });
+        return response()->json(['orders' => $orders], 201);
     }
 
     public function show($id)
@@ -191,8 +184,9 @@ class LabOrderController extends Controller
 
     /**
      * Email the result to the patient. Falls back to accepting an email in
-     * the request if the patient file has none on record yet, and saves it
-     * back to the file for next time.
+     * the request if there's none on record yet (patient file, or the
+     * order's own snapshot email for a standalone walk-in), and saves it
+     * back for next time.
      */
     public function sendResult(Request $request, $id)
     {
@@ -206,7 +200,8 @@ class LabOrderController extends Controller
             'email' => 'nullable|email',
         ]);
 
-        $email = $request->email ?: $order->patientFile->email;
+        $onFileEmail = $order->patientFile?->email ?? $order->patient_email;
+        $email = $request->email ?: $onFileEmail;
 
         if (!$email) {
             return response()->json([
@@ -214,8 +209,12 @@ class LabOrderController extends Controller
             ], 422);
         }
 
-        if ($request->filled('email') && $request->email !== $order->patientFile->email) {
-            $order->patientFile->update(['email' => $request->email]);
+        if ($request->filled('email') && $request->email !== $onFileEmail) {
+            if ($order->patientFile) {
+                $order->patientFile->update(['email' => $request->email]);
+            } else {
+                $order->update(['patient_email' => $request->email]);
+            }
         }
 
         Mail::send('emails.lab-result', ['order' => $order], function ($message) use ($email, $order) {

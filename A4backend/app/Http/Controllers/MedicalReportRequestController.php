@@ -3,10 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\MedicalReportRequest;
-use App\Models\MedicalRecord;
-use App\Models\PatientProfile;
+use App\Models\PatientFile;
 use App\Models\Prescription;
 use App\Models\User;
+use App\Models\VisitRecord;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -59,7 +59,11 @@ class MedicalReportRequestController extends Controller
 
     /**
      * Patient fetches the full report data for an approved request.
-     * This assembles the complete report: profile + records + prescriptions.
+     * Assembled from the real clinical data model — PatientFile/VisitRecord
+     * via whichever files this account has linked (RecordClaimController) —
+     * not the legacy MedicalRecord/PatientProfile tables this used to read,
+     * which nothing in the app ever wrote to and didn't even exist as
+     * tables in the database, so every "approved" report used to 500.
      */
     public function getReport($requestId)
     {
@@ -70,17 +74,28 @@ class MedicalReportRequestController extends Controller
             ->where('status', 'approved')
             ->firstOrFail();
 
-        $patient = User::where('id', $patientId)
-            ->with('patientProfile')
-            ->firstOrFail();
+        $patient = User::findOrFail($patientId);
 
-        $records = MedicalRecord::where('patient_id', $patientId)
+        $linkedFiles = PatientFile::where('linked_user_id', $patientId)->get();
+        $linkedFileIds = $linkedFiles->pluck('id');
+        // Demographics/allergies come from the first linked file — most
+        // patients only ever link one. Visit records and prescriptions
+        // below combine across every linked file, so a patient who somehow
+        // ended up with more than one still sees everything.
+        $primaryFile = $linkedFiles->first();
+
+        $records = VisitRecord::whereIn('patient_file_id', $linkedFileIds)
             ->whereBetween('visit_date', [$reportRequest->date_from, $reportRequest->date_to])
             ->with('doctor:id,name,specialization')
             ->orderBy('visit_date', 'desc')
             ->get();
 
-        $prescriptions = Prescription::where('patient_id', $patientId)
+        // Prescriptions written against the patient's online account
+        // directly, or against any hospital file they've linked.
+        $prescriptions = Prescription::where(function ($q) use ($patientId, $linkedFileIds) {
+                $q->where('patient_id', $patientId)
+                    ->orWhereIn('patient_file_id', $linkedFileIds);
+            })
             ->whereBetween('created_at', [
                 $reportRequest->date_from,
                 $reportRequest->date_to . ' 23:59:59'
@@ -90,15 +105,24 @@ class MedicalReportRequestController extends Controller
             ->get();
 
         return response()->json([
-            'request'       => $reportRequest,
-            'patient'       => [
-                'id'      => $patient->id,
-                'name'    => $patient->name,
-                'email'   => $patient->email,
-                'profile' => $patient->patientProfile,
+            'request'           => $reportRequest,
+            'patient'           => [
+                'id'    => $patient->id,
+                'name'  => $patient->name,
+                'email' => $patient->email,
+                'profile' => $primaryFile ? [
+                    'blood_type'         => $primaryFile->blood_type,
+                    'gender'             => $primaryFile->gender,
+                    'date_of_birth'      => $primaryFile->date_of_birth,
+                    'height_cm'          => $primaryFile->height_cm,
+                    'weight_kg'          => $primaryFile->weight_kg,
+                    'allergies'          => $primaryFile->allergies,
+                    'chronic_conditions' => $primaryFile->chronic_conditions,
+                ] : null,
             ],
-            'records'       => $records,
-            'prescriptions' => $prescriptions,
+            'records'           => $records,
+            'prescriptions'     => $prescriptions,
+            'has_linked_record' => $linkedFileIds->isNotEmpty(),
         ]);
     }
 }

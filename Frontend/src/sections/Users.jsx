@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import api from "../services/api";
 import { toast } from "react-hot-toast";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 export default function Users() {
   const [userData, setUserData] = useState({ data: [], from: 1 });
@@ -21,6 +22,8 @@ export default function Users() {
   const [selectedStatus, setSelectedStatus] = useState("");
   const [openMenuId, setOpenMenuId] = useState(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  // The user pending removal, or null when the confirm dialog is closed.
+  const [userToRemove, setUserToRemove] = useState(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -65,14 +68,15 @@ export default function Users() {
     }
   };
 
-  const handleDeleteUser = async (id) => {
-    if (!window.confirm("Are you sure you want to remove this user?")) return;
+  const handleDeleteUser = async () => {
+    if (!userToRemove) return;
     try {
-      await api.delete(`/admin/users/${id}`);
+      await api.delete(`/admin/users/${userToRemove.id}`);
       toast.success("User removed successfully.");
       fetchUsers();
-    } catch {
+    } catch (err) {
       toast.error("Failed to delete user.");
+      throw err; // keeps the dialog open so the error stays in context
     }
   };
 
@@ -161,7 +165,7 @@ export default function Users() {
 
       {/* Table Container */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto custom-scrollbar">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-slate-100 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50">
@@ -355,7 +359,12 @@ export default function Users() {
           <div className="border-t border-slate-100 dark:border-slate-700 my-2" />
 
           <button
-            onClick={() => handleDeleteUser(openMenuId)}
+            onClick={() => {
+              setUserToRemove(
+                userData.data?.find((u) => u.id === openMenuId) || null
+              );
+              setOpenMenuId(null);
+            }}
             className="w-full text-left px-3 py-1.5 text-sm rounded-lg text-red-500
         hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 transition-colors cursor-pointer"
           >
@@ -364,6 +373,20 @@ export default function Users() {
         </div>,
         document.body
       )}
+
+      <ConfirmDialog
+        isOpen={!!userToRemove}
+        onClose={() => setUserToRemove(null)}
+        onConfirm={handleDeleteUser}
+        title="Remove this user?"
+        message={
+          userToRemove
+            ? `${userToRemove.name} (${userToRemove.email}) will lose access immediately, including any session they currently have open. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Remove User"
+        danger
+      />
     </div>
   );
 }

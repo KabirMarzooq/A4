@@ -244,7 +244,7 @@ export default function Overview() {
               </span>
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-2 scrollbar-hide relative min-h-[500px]">
+            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar relative min-h-[500px]">
               <DailyTimeline
                 appointments={appointments}
                 hoveredId={hoveredPatientId}

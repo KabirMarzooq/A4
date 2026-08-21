@@ -20,12 +20,12 @@ class PaystackController extends Controller
 
         $invoice = Invoice::where('id', $request->invoice_id)
             ->where('patient_id', Auth::id())
-            ->whereIn('status', ['unpaid', 'overdue'])
+            ->whereIn('status', ['unpaid', 'overdue', 'partially_paid'])
             ->firstOrFail();
 
         $patient = Auth::user();
 
-        $amountInKobo = (int) ($invoice->total_amount * 100);
+        $amountInKobo = (int) round($invoice->outstandingBalance() * 100);
 
         $response = $this->callPaystack('POST', '/transaction/initialize', [
             'email'     => $patient->email,
@@ -49,7 +49,7 @@ class PaystackController extends Controller
         Payment::create([
             'invoice_id'        => $invoice->id,
             'patient_id'        => $patient->id,
-            'amount'            => $invoice->total_amount,
+            'amount'            => $amountInKobo / 100,
             'currency'          => 'NGN',
             'status'            => 'pending',
             'gateway'           => 'paystack',
@@ -100,11 +100,18 @@ class PaystackController extends Controller
                     return;
                 }
 
+                // The amount Paystack actually confirmed, not the invoice
+                // total — matters once amount_paid can already be nonzero
+                // from an earlier partial cash payment.
+                $amount = round(($data['amount'] ?? 0) / 100, 2)
+                    ?: (float) $invoice->total_amount;
+
                 $payment = Payment::where('gateway_reference', $reference)->first();
 
                 if ($payment) {
                     $payment->update([
                         'status'           => 'successful',
+                        'amount'           => $amount,
                         'payment_method'   => $data['channel'] ?? 'card',
                         'gateway_response' => $data,
                         'paid_at'          => now(),
@@ -113,7 +120,7 @@ class PaystackController extends Controller
                     $payment = Payment::create([
                         'invoice_id'        => $invoiceId,
                         'patient_id'        => $invoice->patient_id,
-                        'amount'            => $invoice->total_amount,
+                        'amount'            => $amount,
                         'currency'          => 'NGN',
                         'status'            => 'successful',
                         'gateway'           => 'paystack',
@@ -124,24 +131,28 @@ class PaystackController extends Controller
                     ]);
                 }
 
+                $newAmountPaid = round((float) $invoice->amount_paid + $amount, 2);
+                $isFullyPaid   = $newAmountPaid >= (float) $invoice->total_amount - 0.01;
+
                 $invoice->update([
-                    'status'  => 'paid',
-                    'paid_at' => now(),
+                    'amount_paid' => $newAmountPaid,
+                    'status'      => $isFullyPaid ? 'paid' : 'partially_paid',
+                    'paid_at'     => $isFullyPaid ? now() : $invoice->paid_at,
                 ]);
 
-                // Generate receipt
+                // Generate a receipt for this payment specifically.
                 Receipt::create([
                     'receipt_number' => Receipt::generateReceiptNumber(),
                     'payment_id'     => $payment->id,
                     'invoice_id'     => $invoice->id,
                     'patient_id'     => $invoice->patient_id,
-                    'amount_paid'    => $invoice->total_amount,
+                    'amount_paid'    => $amount,
                     'currency'       => 'NGN',
                     'payment_method' => $data['channel'] ?? 'card',
                     'issued_at'      => now(),
                 ]);
 
-                Log::info("Invoice #{$invoice->invoice_number} marked as paid via Paystack.");
+                Log::info("Invoice #{$invoice->invoice_number} payment of {$amount} recorded via Paystack (status: {$invoice->status}).");
             });
         }
 

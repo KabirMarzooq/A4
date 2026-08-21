@@ -17,6 +17,17 @@ import {
 import api from "../services/api";
 import { toast } from "react-hot-toast";
 import { usePaystackEnabled } from "../hooks/usePaystackEnabled";
+import { COMPANY_NAME, COMPANY_RC_NUMBER } from "../utils/companyInfo";
+import { isDoctorRecordAuthor } from "../utils/roleDisplay";
+
+const escapeHtml = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[c]);
 
 const formatNGN = (amount) =>
   new Intl.NumberFormat("en-NG", {
@@ -379,14 +390,22 @@ function InvoiceView({ invoiceId, onBack, onPaid, paystackEnabled }) {
           <div className="grid grid-cols-2 gap-4">
             <DetailChip
               icon={<Stethoscope size={14} />}
-              label="Doctor"
-              value={`Dr. ${invoice?.doctor?.name}`}
+              label="Issued By"
+              value={
+                invoice?.doctor
+                  ? `${
+                      isDoctorRecordAuthor(invoice.doctor) ? "Dr. " : ""
+                    }${invoice.doctor.name}`
+                  : "—"
+              }
             />
-            <DetailChip
-              icon={<User size={14} />}
-              label="Specialization"
-              value={invoice?.doctor?.specialization || "—"}
-            />
+            {invoice?.doctor?.specialization && (
+              <DetailChip
+                icon={<User size={14} />}
+                label="Specialization"
+                value={invoice.doctor.specialization}
+              />
+            )}
             {invoice?.appointment && (
               <>
                 <DetailChip
@@ -552,32 +571,111 @@ function ReceiptView({ receiptId, onBack }) {
   }, [receiptId]);
 
   const handlePrint = () => {
-    const content = printRef.current.innerHTML;
-    const win = window.open("", "_blank");
-    win.document.write(`
+    const invoice = receipt?.invoice;
+    const itemRows = (invoice?.items || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${escapeHtml(item.description)}</td>
+            <td class="amt">${escapeHtml(formatNGN(item.total_price))}</td>
+          </tr>`
+      )
+      .join("");
+
+    const html = `
       <!DOCTYPE html><html><head>
-      <title>Receipt ${receipt?.receipt_number}</title>
+      <meta charset="utf-8" />
+      <title>Receipt ${escapeHtml(receipt?.receipt_number || "")}</title>
       <style>
+        @page { size: 105mm 148mm; margin: 6mm; }
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'Segoe UI',Arial,sans-serif; color:#1e293b; padding:40px; font-size:13px; }
-        .header { display:flex; justify-content:space-between; border-bottom:3px solid #14b8a6; padding-bottom:16px; margin-bottom:20px; }
-        .brand { font-size:22px; font-weight:900; color:#0f766e; }
-        .receipt-tag { background:#f0fdfa; border:1px solid #99f6e4; border-radius:8px; padding:4px 12px; font-size:11px; font-weight:700; color:#0f766e; }
-        .success-box { background:#f0fdf4; border:2px solid #86efac; border-radius:12px; padding:16px; text-align:center; margin:20px 0; }
-        .success-amount { font-size:28px; font-weight:900; color:#15803d; }
-        .meta-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:16px 0; }
-        .meta-item { background:#f8fafc; border-radius:8px; padding:10px; }
-        .meta-label { font-size:9px; text-transform:uppercase; letter-spacing:1px; color:#94a3b8; font-weight:700; }
-        .meta-value { font-size:13px; font-weight:700; margin-top:2px; }
-        table { width:100%; border-collapse:collapse; margin:12px 0; }
-        th { background:#f8fafc; padding:10px; text-align:left; font-size:10px; text-transform:uppercase; color:#64748b; }
-        td { padding:10px; border-bottom:1px solid #e2e8f0; }
-        .total td { font-weight:900; font-size:15px; color:#0f766e; border:none; border-top:2px solid #e2e8f0; }
-        .footer { margin-top:24px; padding-top:12px; border-top:1px solid #e2e8f0; font-size:10px; color:#94a3b8; text-align:center; }
-        @media print { body { padding:20px; } }
+        body { font-family:'Segoe UI',Arial,sans-serif; color:#1e293b; font-size:9px; }
+        .sheet { border:2px solid #0f766e; border-radius:6px; padding:10px; position:relative; overflow:hidden; }
+        .sheet::before {
+          content:''; position:absolute; inset:0; pointer-events:none;
+          border:1px solid #99f6e4; border-radius:4px; margin:3px;
+        }
+        .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #14b8a6; padding-bottom:6px; margin-bottom:8px; }
+        .brand { font-size:14px; font-weight:900; color:#0f766e; letter-spacing:-0.3px; }
+        .brand-sub { font-size:7px; color:#64748b; margin-top:1px; }
+        .rc { font-size:6.5px; color:#94a3b8; margin-top:2px; }
+        .badge { background:#f0fdfa; border:1px solid #5eead4; color:#0f766e; font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; padding:3px 6px; border-radius:999px; white-space:nowrap; }
+        .amount-box { background:#f0fdf4; border:1.5px solid #86efac; border-radius:6px; padding:8px; text-align:center; margin-bottom:8px; }
+        .amount-label { font-size:6.5px; text-transform:uppercase; letter-spacing:0.8px; color:#15803d; font-weight:800; }
+        .amount-value { font-size:17px; font-weight:900; color:#15803d; }
+        .meta { display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:8px; font-size:7.5px; }
+        .meta-item { background:#f8fafc; border-radius:5px; padding:5px 6px; }
+        .meta-label { font-size:6px; text-transform:uppercase; letter-spacing:0.5px; color:#94a3b8; font-weight:700; }
+        .meta-value { font-weight:700; margin-top:1px; }
+        table { width:100%; border-collapse:collapse; margin-bottom:6px; font-size:7.5px; }
+        th { text-align:left; font-size:6px; text-transform:uppercase; letter-spacing:0.5px; color:#64748b; border-bottom:1px solid #cbd5e1; padding:3px 0; }
+        td { padding:3px 0; border-bottom:1px solid #e2e8f0; }
+        .amt { text-align:right; font-weight:700; }
+        .total-row td { font-weight:900; font-size:9px; color:#0f766e; border:none; border-top:2px solid #0f766e; padding-top:5px; }
+        .footer { margin-top:8px; padding-top:6px; border-top:1px dashed #cbd5e1; font-size:6px; color:#94a3b8; text-align:center; line-height:1.5; }
       </style>
-      </head><body>${content}</body></html>
-    `);
+      </head><body>
+        <div class="sheet">
+          <div class="header">
+            <div>
+              <div class="brand">${escapeHtml(COMPANY_NAME)}</div>
+              <div class="brand-sub">Hospital Management System</div>
+              <div class="rc">${escapeHtml(COMPANY_RC_NUMBER)}</div>
+            </div>
+            <span class="badge">Official Receipt</span>
+          </div>
+
+          <div class="amount-box">
+            <div class="amount-label">Payment Successful</div>
+            <div class="amount-value">${escapeHtml(formatNGN(receipt?.amount_paid))}</div>
+          </div>
+
+          <div class="meta">
+            <div class="meta-item">
+              <div class="meta-label">Receipt No.</div>
+              <div class="meta-value">${escapeHtml(receipt?.receipt_number || "—")}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Invoice No.</div>
+              <div class="meta-value">${escapeHtml(invoice?.invoice_number || "—")}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Payment Date</div>
+              <div class="meta-value">${escapeHtml(formatDate(receipt?.issued_at))}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Issued By</div>
+              <div class="meta-value">${escapeHtml(
+                invoice?.doctor
+                  ? `${isDoctorRecordAuthor(invoice.doctor) ? "Dr. " : ""}${invoice.doctor.name}`
+                  : "—"
+              )}</div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr><th>Description</th><th class="amt">Amount</th></tr>
+            </thead>
+            <tbody>${itemRows}</tbody>
+            <tfoot>
+              <tr class="total-row">
+                <td>Total Paid</td>
+                <td class="amt">${escapeHtml(formatNGN(receipt?.amount_paid))}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div class="footer">
+            Thank you for your payment. This is an official receipt from ${escapeHtml(COMPANY_NAME)} HMS.<br />
+            ${escapeHtml(COMPANY_RC_NUMBER)} · Generated on ${escapeHtml(formatDate(new Date()))}
+          </div>
+        </div>
+      </body></html>
+    `;
+
+    const win = window.open("", "_blank");
+    win.document.write(html);
     win.document.close();
     win.focus();
     win.print();
@@ -617,6 +715,9 @@ function ReceiptView({ receiptId, onBack }) {
               A4 Medical
             </h1>
             <p className="text-xs text-slate-400">Hospital Management System</p>
+            <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-0.5">
+              {COMPANY_RC_NUMBER}
+            </p>
           </div>
           <span className="bg-teal-50 dark:bg-teal-500/10 border border-teal-200 dark:border-teal-500/30 text-teal-700 dark:text-teal-400 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full">
             Official Receipt
@@ -658,8 +759,14 @@ function ReceiptView({ receiptId, onBack }) {
           <div className="grid grid-cols-2 gap-3">
             <DetailChip
               icon={<Stethoscope size={13} />}
-              label="Doctor"
-              value={`Dr. ${invoice?.doctor?.name}`}
+              label="Issued By"
+              value={
+                invoice?.doctor
+                  ? `${
+                      isDoctorRecordAuthor(invoice.doctor) ? "Dr. " : ""
+                    }${invoice.doctor.name}`
+                  : "—"
+              }
             />
             {invoice?.appointment && (
               <DetailChip
@@ -717,10 +824,10 @@ function ReceiptView({ receiptId, onBack }) {
           <div className="border-t border-slate-200 dark:border-slate-700 pt-4 text-center">
             <p className="text-xs text-slate-400">
               Thank you for your payment. This is an official receipt from
-              A4 Medical Consortium HMS.
+              {" "}{COMPANY_NAME} HMS.
             </p>
             <p className="text-xs text-slate-300 dark:text-slate-600 mt-1">
-              Generated on {formatDate(new Date())}
+              {COMPANY_RC_NUMBER} · Generated on {formatDate(new Date())}
             </p>
           </div>
         </div>

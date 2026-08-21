@@ -20,6 +20,13 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\Http\Middleware\HandleCors::class,
         ]);
 
+        // Re-check account status on every request, not just at login — so
+        // a deactivated/deleted user is locked out of a session already in
+        // progress within one request, instead of up to an hour later.
+        $middleware->api(append: [
+            \App\Http\Middleware\EnsureUserActive::class,
+        ]);
+
         // Blanket rate limit (60/min per authenticated user, else per IP) on
         // every API route as defense-in-depth, on top of the tighter named
         // limiters already applied to specific sensitive routes (login,

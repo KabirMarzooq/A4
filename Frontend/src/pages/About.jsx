@@ -1,6 +1,6 @@
 import { Button, ButtonB } from "../components/Button.jsx";
 import { motion } from "framer-motion";
-import Visiting from "../assets/visiting.jpeg";
+import BrandPanel from "../assets/a4-brand-panel.jpg";
 import Isometric from "../assets/a4-endoscopy-service.png";
 import Cones from "../assets/a4-building.png";
 import Badge from "../assets/a4-logo-badge.png";
@@ -134,8 +134,8 @@ function About() {
             />
             <img
               loading="lazy"
-              src={Visiting}
-              alt="Patient visiting the clinic"
+              src={BrandPanel}
+              alt="A4 Medical Consortium"
               className="aspect-[4/3] w-full object-cover rounded-2xl shadow-md shadow-gray-200"
             />
           </div>

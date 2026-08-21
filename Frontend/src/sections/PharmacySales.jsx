@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import api from "../services/api";
 import { toast } from "react-hot-toast";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const formatNGN = (amount) =>
   new Intl.NumberFormat("en-NG", {
@@ -41,6 +42,7 @@ export default function PharmacySales() {
   const [viewingHistory, setViewingHistory] = useState(null);
   const [activeTab, setActiveTab] = useState("today");
   const [closing, setClosing] = useState(false);
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
 
   const fetchToday = async () => {
     try {
@@ -59,7 +61,6 @@ export default function PharmacySales() {
   }, []);
 
   const handleCloseSale = async () => {
-    if (!window.confirm("Close today's sale? This cannot be undone.")) return;
     setClosing(true);
     try {
       await api.patch("/pharmacy/sales/close");
@@ -68,6 +69,7 @@ export default function PharmacySales() {
       setActiveTab("history");
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to close sale.");
+      throw err; // keeps the confirm dialog open on failure
     } finally {
       setClosing(false);
     }
@@ -108,7 +110,7 @@ export default function PharmacySales() {
 
         {!isClosed && (
           <button
-            onClick={handleCloseSale}
+            onClick={() => setConfirmCloseOpen(true)}
             disabled={closing || items.length === 0}
             className="flex items-center gap-2 px-5 py-3 bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white font-bold rounded-2xl text-sm transition-all cursor-pointer"
           >
@@ -150,6 +152,20 @@ export default function PharmacySales() {
       {activeTab === "history" && (
         <HistoryTab history={history} onView={(id) => setViewingHistory(id)} />
       )}
+
+      <ConfirmDialog
+        isOpen={confirmCloseOpen}
+        onClose={() => setConfirmCloseOpen(false)}
+        onConfirm={handleCloseSale}
+        title="Close today's sale?"
+        message={`This finalises ${items.length} item${
+          items.length === 1 ? "" : "s"
+        } for ${formatDate(
+          todaySale?.sale_date || new Date()
+        )} and moves the record to History. No further items can be added afterwards, and this cannot be undone.`}
+        confirmLabel="Close Sale"
+        danger
+      />
     </div>
   );
 }
@@ -315,7 +331,7 @@ function TodaySalesTab({ sale, items, isClosed, onRefresh }) {
               {showDropdown && filteredDrugs.length > 0 && (
                 <div
                   ref={dropdownRef}
-                  className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl z-50 max-h-60 overflow-y-auto"
+                  className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-xl z-50 max-h-60 overflow-y-auto custom-scrollbar"
                 >
                   {filteredDrugs.map((drug) => (
                     <button

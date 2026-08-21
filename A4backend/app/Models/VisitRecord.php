@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\TextCase;
 use Illuminate\Database\Eloquent\Model;
 
 class VisitRecord extends Model
@@ -45,6 +46,47 @@ class VisitRecord extends Model
         'post_weight_kg'   => 'decimal:2',
         'duration_hours'   => 'decimal:1',
     ];
+
+    // Sentence case — free-text clinical narrative.
+    public function setChiefComplaintAttribute($value): void
+    {
+        $this->attributes['chief_complaint'] = TextCase::sentence($value);
+    }
+
+    public function setPhysicalExaminationAttribute($value): void
+    {
+        $this->attributes['physical_examination'] = TextCase::sentence($value);
+    }
+
+    public function setInvestigationAttribute($value): void
+    {
+        $this->attributes['investigation'] = TextCase::sentence($value);
+    }
+
+    public function setTestResultsAttribute($value): void
+    {
+        $this->attributes['test_results'] = TextCase::sentence($value);
+    }
+
+    public function setDiagnosisAttribute($value): void
+    {
+        $this->attributes['diagnosis'] = TextCase::sentence($value);
+    }
+
+    public function setNotesAttribute($value): void
+    {
+        $this->attributes['notes'] = TextCase::sentence($value);
+    }
+
+    public function setActionTakenAttribute($value): void
+    {
+        $this->attributes['action_taken'] = TextCase::sentence($value);
+    }
+
+    public function setComplicationsAttribute($value): void
+    {
+        $this->attributes['complications'] = TextCase::sentence($value);
+    }
 
     public function patientFile()
     {

@@ -9,6 +9,7 @@ import {
 import api from "../services/api";
 import toast from "react-hot-toast";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { isActingAsDoctor, getStoredActiveRole } from "../utils/roleDisplay";
 
 export default function Profile() {
   const [loading, setLoading] = useState(true);
@@ -128,7 +129,10 @@ export default function Profile() {
 
               <div className="text-center mt-4">
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-                  {profile.role?.toLowerCase() === "doctor" && "Dr. "} {profile.firstName} {profile.lastName}
+                  {isActingAsDoctor(
+                    { role: profile.role },
+                    getStoredActiveRole()
+                  ) && "Dr. "} {profile.firstName} {profile.lastName}
                 </h3>
 
                 {/* Dynamic Role Badge */}

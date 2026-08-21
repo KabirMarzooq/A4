@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\TextCase;
 use Illuminate\Database\Eloquent\Model;
 
 class PatientFile extends Model
@@ -36,12 +37,66 @@ class PatientFile extends Model
         'next_of_kin_email',
         'created_by',
         'current_doctor_id',
+        'linked_user_id',
     ];
 
     protected $casts = [
         'date_of_birth' => 'date',
         'blood_test_date' => 'date',
     ];
+
+    // Title Case for proper nouns — a name typed in ALL CAPS or all
+    // lowercase normalizes the same way regardless of entry point.
+    public function setFirstNameAttribute($value): void
+    {
+        $this->attributes['first_name'] = TextCase::title($value);
+    }
+
+    public function setLastNameAttribute($value): void
+    {
+        $this->attributes['last_name'] = TextCase::title($value);
+    }
+
+    public function setPlaceOfOriginAttribute($value): void
+    {
+        $this->attributes['place_of_origin'] = TextCase::title($value);
+    }
+
+    public function setTribeAttribute($value): void
+    {
+        $this->attributes['tribe'] = TextCase::title($value);
+    }
+
+    public function setOccupationAttribute($value): void
+    {
+        $this->attributes['occupation'] = TextCase::title($value);
+    }
+
+    public function setReligionAttribute($value): void
+    {
+        $this->attributes['religion'] = TextCase::title($value);
+    }
+
+    public function setNextOfKinNameAttribute($value): void
+    {
+        $this->attributes['next_of_kin_name'] = TextCase::title($value);
+    }
+
+    public function setNextOfKinRelationshipAttribute($value): void
+    {
+        $this->attributes['next_of_kin_relationship'] = TextCase::title($value);
+    }
+
+    // Sentence case — free-text, not a name.
+    public function setAllergiesAttribute($value): void
+    {
+        $this->attributes['allergies'] = TextCase::sentence($value);
+    }
+
+    public function setChronicConditionsAttribute($value): void
+    {
+        $this->attributes['chronic_conditions'] = TextCase::sentence($value);
+    }
 
     public function folder()
     {
@@ -61,6 +116,13 @@ class PatientFile extends Model
     public function currentDoctor()
     {
         return $this->belongsTo(User::class, 'current_doctor_id');
+    }
+
+    // The online account this desk-created file has been "claimed" by, if
+    // any — see RecordClaimController.
+    public function linkedUser()
+    {
+        return $this->belongsTo(User::class, 'linked_user_id');
     }
 
     public function transfers()

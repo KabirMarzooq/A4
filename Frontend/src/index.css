@@ -142,6 +142,54 @@
         scrollbar-width: none;
     }
 
+    /* Thin, auto-hiding scrollbar for panels that don't have room to spare —
+       invisible at rest, fades in only while the user is hovering (or
+       actively scrolling with keyboard focus) over that specific container.
+       Not a full a11y/two-finger-scroll replacement (this is decorative,
+       the browser's native scroll thumb still exists underneath), it's for
+       systems without trackpad two-finger scroll where a visible-on-demand
+       scrollbar is still needed to know a panel is scrollable at all. */
+    .custom-scrollbar {
+        scrollbar-width: thin;
+        scrollbar-color: transparent transparent;
+        transition: scrollbar-color 0.2s ease;
+    }
+
+    .custom-scrollbar:hover,
+    .custom-scrollbar:focus-within {
+        scrollbar-color: rgb(148 163 184 / 0.6) transparent;
+    }
+
+    html.dark .custom-scrollbar:hover,
+    html.dark .custom-scrollbar:focus-within {
+        scrollbar-color: rgb(100 116 139 / 0.6) transparent;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background-color: transparent;
+        border-radius: 9999px;
+        transition: background-color 0.2s ease;
+    }
+
+    .custom-scrollbar:hover::-webkit-scrollbar-thumb,
+    .custom-scrollbar:focus-within::-webkit-scrollbar-thumb {
+        background-color: rgb(148 163 184 / 0.6);
+    }
+
+    html.dark .custom-scrollbar:hover::-webkit-scrollbar-thumb,
+    html.dark .custom-scrollbar:focus-within::-webkit-scrollbar-thumb {
+        background-color: rgb(100 116 139 / 0.6);
+    }
+
     .scroll-container:hover .scroll-content {
         animation-play-state: paused !important;
     }

@@ -20,17 +20,19 @@ import {
   CalendarDays,
   RefreshCw,
   FlaskConical,
+  BedDouble,
 } from "lucide-react";
 import { useTheme } from "../layouts/ThemeContext";
 import api from "../services/api";
 import { stopTokenRefresh } from "../utils/tokenRefresh";
 import { useNotifications } from "../hooks/useNotifications";
+import { isActingAsDoctor } from "../utils/roleDisplay";
 
 // Role Configuration
 const ROLE_NAV_ITEMS = {
   Patient: [
     {
-      label: "My Appointments",
+      label: "Appointments",
       path: "/dashboard/my-appointments",
       icon: Calendar,
       notificationKey: "my-appointments",
@@ -44,21 +46,21 @@ const ROLE_NAV_ITEMS = {
       title: "Access my prescriptions",
     },
     {
-      label: "Book Appointment",
+      label: "Book Visit",
       path: "/dashboard/bookAppointment",
       icon: Calendar,
       notificationKey: "book-appointments",
       title: "Book appointments",
     },
     {
-      label: "Bills and Receipts",
+      label: "Billing",
       path: "/dashboard/bills&receipts",
       icon: CreditCard,
       notificationKey: "bills-and-receipts",
       title: "Manage billing and payments",
     },
     {
-      label: "Medical Reports",
+      label: "Reports",
       path: "/dashboard/medical-reports",
       icon: Activity,
       notificationKey: "medical-reports",
@@ -81,7 +83,7 @@ const ROLE_NAV_ITEMS = {
       title: "Manage appointments",
     },
     {
-      label: "My Patients",
+      label: "Patients",
       path: "/dashboard/patients",
       icon: Users,
       notificationKey: "my-patients",
@@ -95,23 +97,30 @@ const ROLE_NAV_ITEMS = {
       title: "View prescriptions",
     },
     {
-      label: "Medical Records",
+      label: "Records",
       path: "/dashboard/medical-records",
       icon: Activity,
       notificationKey: "medical-records",
       title: "View medical records",
     },
+    {
+      label: "Admissions",
+      path: "/dashboard/admissions",
+      icon: BedDouble,
+      notificationKey: "admissions",
+      title: "Patients on the ward",
+    },
   ],
   Admin: [
     {
-      label: "Sales Records",
+      label: "Sales",
       path: "/dashboard/sales-records",
       icon: CreditCard,
       notificationKey: "sales-records",
       title: "View sales records",
     },
     {
-      label: "All Users",
+      label: "Users",
       path: "/dashboard/users",
       icon: Users,
       notificationKey: "users",
@@ -125,11 +134,18 @@ const ROLE_NAV_ITEMS = {
       title: "Manage schedule",
     },
     {
-      label: "Bills and Receipts",
+      label: "Billing",
       path: "/dashboard/bills-and-receipts",
       icon: CreditCard,
       notificationKey: "all-bills-and-receipts",
       title: "Manage billing and payments",
+    },
+    {
+      label: "Records",
+      path: "/dashboard/medical-records",
+      icon: Activity,
+      notificationKey: "medical-records",
+      title: "View medical records",
     },
     {
       label: "Inventory",
@@ -139,14 +155,21 @@ const ROLE_NAV_ITEMS = {
       title: "Manage inventory",
     },
     {
-      label: "System Logs",
+      label: "Logs",
       path: "/dashboard/logs",
       icon: Monitor,
       notificationKey: "system-logs",
       title: "View system logs",
     },
     {
-      label: "Report Requests",
+      label: "Admissions",
+      path: "/dashboard/admissions",
+      icon: BedDouble,
+      notificationKey: "admissions",
+      title: "Patients on the ward",
+    },
+    {
+      label: "Requests",
       path: "/dashboard/report-requests",
       icon: Activity,
       notificationKey: "report-requests",
@@ -155,13 +178,6 @@ const ROLE_NAV_ITEMS = {
   ],
   Receptionist: [
     {
-      label: "Sales Records",
-      path: "/dashboard/sales-records",
-      icon: CreditCard,
-      notificationKey: "sales-records",
-      title: "View sales records",
-    },
-    {
       label: "Schedules",
       path: "/dashboard/appointments",
       icon: Calendar,
@@ -169,7 +185,7 @@ const ROLE_NAV_ITEMS = {
       title: "Manage schedule",
     },
     {
-      label: "Bills and Receipts",
+      label: "Billing",
       path: "/dashboard/bills-and-receipts",
       icon: CreditCard,
       notificationKey: "all-bills-and-receipts",
@@ -183,16 +199,23 @@ const ROLE_NAV_ITEMS = {
       title: "View prescriptions",
     },
     {
-      label: "Patient Records",
+      label: "Records",
       path: "/dashboard/medical-records",
       icon: Activity,
       notificationKey: "medical-records",
       title: "View medical reports",
     },
+    {
+      label: "Admissions",
+      path: "/dashboard/admissions",
+      icon: BedDouble,
+      notificationKey: "admissions",
+      title: "Patients on the ward",
+    },
   ],
   Pharmacy: [
     {
-      label: "Sales Records",
+      label: "Sales",
       path: "/dashboard/sales-records",
       icon: CreditCard,
       notificationKey: "sales-records",
@@ -215,7 +238,7 @@ const ROLE_NAV_ITEMS = {
   ],
   Lab: [
     {
-      label: "Lab Dashboard",
+      label: "Lab",
       path: "/dashboard/lab",
       icon: FlaskConical,
       notificationKey: "lab-orders",
@@ -361,7 +384,7 @@ export default function DashboardLayout() {
             <span className="text-2xl font-bold italic">A4 Medical</span>
           </div>
 
-          <nav className="flex-1 space-y-3 overflow-y-auto pr-2 custom-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+          <nav className="flex-1 space-y-3 overflow-y-auto pr-2 custom-scrollbar">
             {navItems.map((item) => (
               <NavLink
                 key={item.label}
@@ -468,8 +491,13 @@ export default function DashboardLayout() {
           />
         )}
 
-        {/* Main Content Area */}
-        <main className="flex-1 flex flex-col">
+        {/* Main Content Area.
+            min-w-0 is load-bearing: as a flex item its default min-width is
+            "auto" (= content min-width), so a wide descendant — e.g. the
+            dialysis register's min-w-[1400px] table — would stretch <main>
+            past the viewport and make the WHOLE shell scroll sideways
+            instead of just that table's own overflow-x-auto wrapper. */}
+        <main className="flex-1 min-w-0 flex flex-col">
           <header className="h-20 px-1 md:px-8 flex items-center justify-between border-b border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-950/50 backdrop-blur-xl sticky top-0 z-20 w-full">
             {normalizedRole === "Admin" ? (
               <div className="flex items-center sm:gap-4 gap-1">
@@ -540,7 +568,7 @@ export default function DashboardLayout() {
               <div className="flex items-center gap-3 sm:gap-4 sm:border-l pl-2 sm:pl-6 border-gray-200 dark:border-slate-800">
                 <div className="hidden sm:block text-right">
                   <p className="text-sm font-bold dark:text-white">
-                    {user.role?.toLowerCase() === "doctor" && "Dr. "}
+                    {isActingAsDoctor(user, activeRole) && "Dr. "}
                     {userName}
                   </p>
                   <p className="text-xs text-gray-500">{userRole}</p>

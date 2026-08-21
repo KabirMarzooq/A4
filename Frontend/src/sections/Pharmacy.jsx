@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import api from "../services/api";
 import { toast } from "react-hot-toast";
+import { printPrescription } from "../utils/printPrescription";
 
 export default function Pharmacy() {
   const [prescriptions, setPrescriptions] = useState([]);
@@ -39,82 +40,7 @@ export default function Pharmacy() {
     }
   };
 
-  const handleDownload = (p) => {
-    const rows = p.items?.length
-      ? p.items
-          .map(
-            (item) => `
-              <tr>
-                <td>${item.drug_name}</td>
-                <td>${item.quantity}</td>
-                <td>${item.dosage || "—"}</td>
-                <td>${item.frequency || "—"}</td>
-                <td>${item.duration || "—"}</td>
-              </tr>`
-          )
-          .join("")
-      : `
-        <tr>
-          <td>${p.medication || "—"}</td>
-          <td>—</td>
-          <td>${p.dosage || "—"}</td>
-          <td>${p.frequency || "—"}</td>
-          <td>${p.duration || "—"}</td>
-        </tr>`;
-
-    const win = window.open("", "_blank");
-    win.document.write(`
-      <!DOCTYPE html><html><head>
-      <title>Prescription - ${p.medication || p.id}</title>
-      <style>
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'Segoe UI',Arial,sans-serif; color:#1e293b; padding:40px; font-size:13px; }
-        .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #1B7A3D; padding-bottom:16px; margin-bottom:20px; }
-        .brand { font-size:22px; font-weight:900; color:#1B7A3D; }
-        .sub { font-size:11px; color:#64748b; margin-top:2px; }
-        .meta-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:16px 0 20px; }
-        .meta-item { background:#f8fafc; border-radius:8px; padding:10px; }
-        .meta-label { font-size:9px; text-transform:uppercase; letter-spacing:1px; color:#94a3b8; font-weight:700; }
-        .meta-value { font-size:13px; font-weight:700; margin-top:2px; }
-        table { width:100%; border-collapse:collapse; margin:12px 0; }
-        th { background:#f8fafc; padding:10px; text-align:left; font-size:10px; text-transform:uppercase; color:#64748b; }
-        td { padding:10px; border-bottom:1px solid #e2e8f0; font-size:12px; }
-        .footer { margin-top:24px; padding-top:12px; border-top:1px solid #e2e8f0; font-size:10px; color:#94a3b8; text-align:center; }
-        @media print { body { padding:20px; } }
-      </style>
-      </head><body>
-        <div class="header">
-          <div>
-            <div class="brand">A4 Medical Consortium</div>
-            <div class="sub">Official Prescription</div>
-          </div>
-          <div class="sub">Issued: ${p.created_at ? p.created_at.split("T")[0] : "—"}</div>
-        </div>
-        <div class="meta-grid">
-          <div class="meta-item">
-            <div class="meta-label">Prescribed By</div>
-            <div class="meta-value">Dr. ${p.doctor?.name || "—"}</div>
-          </div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Medication</th>
-              <th>Qty</th>
-              <th>Dosage</th>
-              <th>Frequency</th>
-              <th>Duration</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-        <div class="footer">This is an official prescription issued by A4 Medical Consortium.</div>
-      </body></html>
-    `);
-    win.document.close();
-    win.focus();
-    win.print();
-  };
+  const handleDownload = (p) => printPrescription(p);
 
   const filtered = prescriptions.filter(
     (p) =>

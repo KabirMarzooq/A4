@@ -17,10 +17,25 @@ import {
   X,
   Landmark,
   MoreHorizontal,
+  Wallet,
 } from "lucide-react";
 import api from "../services/api";
 import { toast } from "react-hot-toast";
 import { usePaystackEnabled } from "../hooks/usePaystackEnabled";
+import { isDoctorRecordAuthor } from "../utils/roleDisplay";
+import { COMPANY_NAME, COMPANY_RC_NUMBER } from "../utils/companyInfo";
+
+// Print templates build raw HTML strings from user/patient-entered data
+// (names, descriptions), so this guards against that data breaking out of
+// its tag context in the print window.
+const escapeHtml = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[c]);
 
 const formatNGN = (amount) =>
   new Intl.NumberFormat("en-NG", {
@@ -28,6 +43,9 @@ const formatNGN = (amount) =>
     currency: "NGN",
     minimumFractionDigits: 2,
   }).format(amount);
+
+const formatInvoiceType = (type) =>
+  (type || "").replace(/_/g, " ");
 
 const formatDate = (date, opts = {}) =>
   new Date(date).toLocaleDateString("en-NG", {
@@ -57,7 +75,21 @@ export default function ReceptionBills() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [viewingInvoice, setViewingInvoice] = useState(null);
   const [viewingReceiptId, setViewingReceiptId] = useState(null);
+  const [isCreateInvoiceOpen, setIsCreateInvoiceOpen] = useState(false);
   const paystackEnabled = usePaystackEnabled();
+
+  // Admin-only: total revenue collected today across every treatment/invoice.
+  // This page is also shared with receptionist/pharmacy (see App.jsx route
+  // guard), so the widget stays gated even though it lives here now.
+  const currentUser = JSON.parse(localStorage.getItem("a4_user") || "null");
+  const isAdmin = currentUser?.role?.toLowerCase() === "admin";
+  // Create Invoice is reception/admin only — pharmacy shares this page for
+  // its own sales history but has its own sales desk, not this flow (see
+  // routes/api.php's reception/bills POST route).
+  const canCreateInvoice = ["admin", "receptionist"].includes(
+    currentUser?.role?.toLowerCase()
+  );
+  const [revenueToday, setRevenueToday] = useState(null);
 
   const fetchBills = async (search = "") => {
     try {
@@ -75,6 +107,15 @@ export default function ReceptionBills() {
   useEffect(() => {
     fetchBills();
     loadPaystackScript();
+    if (isAdmin) {
+      api
+        .get("/admin/revenue/today")
+        .then((res) => setRevenueToday(res.data))
+        .catch(() => {});
+    }
+    // isAdmin is derived from localStorage once and won't change for the
+    // component's lifetime, matching the existing run-once-on-mount pattern.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -136,14 +177,55 @@ export default function ReceptionBills() {
   return (
     <div className="p-6">
       {/* Header */}
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
-          Bills & Receipts
-        </h2>
-        <p className="text-slate-500 text-sm mt-1">
-          Manage all patient billing and process payments
-        </p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+            Bills & Receipts
+          </h2>
+          <p className="text-slate-500 text-sm mt-1">
+            Manage all patient billing and process payments
+          </p>
+        </div>
+        {canCreateInvoice && (
+          <button
+            onClick={() => setIsCreateInvoiceOpen(true)}
+            className="bg-teal-500 hover:bg-teal-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 shadow-lg shadow-teal-500/20 transition-all active:scale-95 cursor-pointer"
+          >
+            <Receipt size={18} /> Create Invoice
+          </button>
+        )}
       </div>
+
+      <CreateInvoiceModal
+        isOpen={isCreateInvoiceOpen}
+        onClose={() => setIsCreateInvoiceOpen(false)}
+        onCreated={() => {
+          setIsCreateInvoiceOpen(false);
+          fetchBills(searchTerm);
+        }}
+      />
+
+      {isAdmin && revenueToday && (
+        <div className="bg-gradient-to-br from-teal-600 to-teal-500 rounded-3xl p-6 shadow-lg shadow-teal-500/20 text-white mb-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-teal-100 text-xs font-bold uppercase tracking-widest mb-1">
+                Total Revenue Today
+              </p>
+              <p className="text-3xl font-bold">
+                {formatNGN(revenueToday.total_today)}
+              </p>
+              <p className="text-teal-100 text-xs mt-1">
+                Across {revenueToday.invoice_count} paid invoice
+                {revenueToday.invoice_count === 1 ? "" : "s"} — treatments &amp; bills
+              </p>
+            </div>
+            <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center">
+              <Wallet size={26} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
@@ -194,19 +276,21 @@ export default function ReceptionBills() {
           />
         </div>
         <div className="flex gap-2">
-          {["all", "unpaid", "overdue", "paid"].map((status) => (
-            <button
-              key={status}
-              onClick={() => setFilterStatus(status)}
-              className={`px-4 py-2 rounded-2xl text-sm font-bold capitalize transition-all cursor-pointer ${
-                filterStatus === status
-                  ? "bg-teal-500 text-white shadow-lg shadow-teal-500/20"
-                  : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-teal-300"
-              }`}
-            >
-              {status}
-            </button>
-          ))}
+          {["all", "unpaid", "partially_paid", "overdue", "paid"].map(
+            (status) => (
+              <button
+                key={status}
+                onClick={() => setFilterStatus(status)}
+                className={`px-4 py-2 rounded-2xl text-sm font-bold capitalize transition-all cursor-pointer ${
+                  filterStatus === status
+                    ? "bg-teal-500 text-white shadow-lg shadow-teal-500/20"
+                    : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-teal-300"
+                }`}
+              >
+                {status.replace("_", " ")}
+              </button>
+            )
+          )}
         </div>
       </div>
 
@@ -240,9 +324,261 @@ export default function ReceptionBills() {
   );
 }
 
+// ── CREATE INVOICE ──────────────────────────────────────────────────────────
+// Reuses the online/walk-in patient picker pattern from Prescriptions.jsx —
+// a receptionist/admin bills a patient directly for something that isn't a
+// visit record (doctors no longer generate invoices) or a lab order (still
+// unpriced). Line items are free-form so it covers whatever the front desk
+// is actually charging for.
+const EMPTY_ITEM = { description: "", quantity: 1, unit_price: "" };
+
+function CreateInvoiceModal({ isOpen, onClose, onCreated }) {
+  const [patients, setPatients] = useState([]);
+  const [patientFiles, setPatientFiles] = useState([]);
+  const [selectedPatient, setSelectedPatient] = useState("");
+  const [items, setItems] = useState([{ ...EMPTY_ITEM }]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    Promise.all([
+      api.get("/patients"),
+      api.get("/folders", { params: { with_files: 1 } }),
+    ])
+      .then(([patientsRes, filesRes]) => {
+        setPatients(patientsRes.data || []);
+        const allFiles = (filesRes.data || []).flatMap((folder) =>
+          (folder.files || []).map((file) => ({
+            ...file,
+            display: `${file.first_name} ${file.last_name} — ${folder.folder_name}`,
+          }))
+        );
+        setPatientFiles(allFiles);
+      })
+      .catch(() => toast.error("Failed to load patients."));
+  }, [isOpen]);
+
+  const setItem = (index, field, value) =>
+    setItems((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+
+  const addItem = () => setItems((prev) => [...prev, { ...EMPTY_ITEM }]);
+  const removeItem = (index) =>
+    setItems((prev) => prev.filter((_, i) => i !== index));
+
+  const total = items.reduce(
+    (sum, i) => sum + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0),
+    0
+  );
+
+  const reset = () => {
+    setSelectedPatient("");
+    setItems([{ ...EMPTY_ITEM }]);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedPatient) return toast.error("Please select a patient.");
+    if (
+      items.some(
+        (i) => !i.description.trim() || !i.quantity || i.unit_price === ""
+      )
+    )
+      return toast.error("Please complete every line item.");
+
+    const isFile = selectedPatient.startsWith("file-");
+    const patientPayload = isFile
+      ? { patient_file_id: selectedPatient.replace("file-", "") }
+      : { patient_id: selectedPatient.replace("user-", "") };
+
+    setSaving(true);
+    try {
+      await api.post("/reception/bills", {
+        ...patientPayload,
+        items: items.map((i) => ({
+          description: i.description,
+          quantity: Number(i.quantity),
+          unit_price: Number(i.unit_price),
+        })),
+      });
+      toast.success("Invoice created.");
+      reset();
+      onCreated();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to create invoice.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 transition-opacity duration-300">
+      <div
+        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-800 p-8 transform transition-transform duration-300 border-l border-slate-200 dark:border-slate-700 overflow-y-auto custom-scrollbar">
+        <div className="flex justify-between items-center mb-8">
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+            Create Invoice
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full transition-colors cursor-pointer"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase mb-2 block">
+              Patient
+            </label>
+            <select
+              className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 text-sm"
+              value={selectedPatient}
+              onChange={(e) => setSelectedPatient(e.target.value)}
+            >
+              <option value="">Select a patient</option>
+              {patients.length > 0 && (
+                <optgroup label="── Online Patients ──">
+                  {patients.map((p) => (
+                    <option key={`user-${p.id}`} value={`user-${p.id}`}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {patientFiles.length > 0 && (
+                <optgroup label="── Walk-in Patients ──">
+                  {patientFiles.map((f) => (
+                    <option key={`file-${f.id}`} value={`file-${f.id}`}>
+                      {f.display}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase mb-3 block">
+              Line Items
+            </label>
+            <div className="space-y-3">
+              {items.map((item, index) => (
+                <div
+                  key={index}
+                  className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-3 border border-slate-200 dark:border-slate-700 space-y-2"
+                >
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      placeholder="e.g. Ward fee, wound dressing..."
+                      className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 text-sm"
+                      value={item.description}
+                      onChange={(e) =>
+                        setItem(index, "description", e.target.value)
+                      }
+                    />
+                    {items.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeItem(index)}
+                        className="p-2 text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-xl cursor-pointer"
+                      >
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <p className="text-slate-400 font-bold uppercase mb-1">
+                        Qty
+                      </p>
+                      <input
+                        type="number"
+                        min="1"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                        value={item.quantity}
+                        onChange={(e) =>
+                          setItem(index, "quantity", e.target.value)
+                        }
+                      />
+                    </div>
+                    <div>
+                      <p className="text-slate-400 font-bold uppercase mb-1">
+                        Unit Price
+                      </p>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                        value={item.unit_price}
+                        onChange={(e) =>
+                          setItem(index, "unit_price", e.target.value)
+                        }
+                      />
+                    </div>
+                    <div>
+                      <p className="text-slate-400 font-bold uppercase mb-1">
+                        Total
+                      </p>
+                      <p className="p-2.5 bg-teal-50 dark:bg-teal-500/10 rounded-xl text-teal-600 dark:text-teal-400 font-bold">
+                        {formatNGN(
+                          (Number(item.quantity) || 0) *
+                            (Number(item.unit_price) || 0)
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={addItem}
+              className="mt-3 text-teal-600 dark:text-teal-400 text-sm font-bold hover:underline cursor-pointer"
+            >
+              + Add another item
+            </button>
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl p-4 flex justify-between items-center">
+            <span className="text-sm font-bold text-slate-500 uppercase">
+              Total
+            </span>
+            <span className="text-xl font-black text-slate-900 dark:text-white">
+              {formatNGN(total)}
+            </span>
+          </div>
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full py-4 bg-teal-500 hover:bg-teal-600 disabled:opacity-60 text-white font-bold rounded-2xl transition-all shadow-lg shadow-teal-500/25 cursor-pointer"
+          >
+            {saving ? "Creating..." : "Create Invoice"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function InvoiceCard({ invoice, onView, onViewReceipt }) {
   const isPaid = invoice.status === "paid";
   const isOverdue = invoice.status === "overdue";
+  const isPartial = invoice.status === "partially_paid";
+  const balance = Number(invoice.total_amount) - Number(invoice.amount_paid || 0);
 
   return (
     <div
@@ -287,13 +623,13 @@ function InvoiceCard({ invoice, onView, onViewReceipt }) {
               <span className="font-mono font-bold">
                 {invoice.invoice_number}
               </span>
-              <span className="capitalize">{invoice.type}</span>
+              <span className="capitalize">
+                {formatInvoiceType(invoice.type)}
+              </span>
               <span>
                 {invoice.doctor
                   ? `${
-                      invoice.doctor.role?.toLowerCase() === "doctor"
-                        ? "Dr. "
-                        : ""
+                      isDoctorRecordAuthor(invoice.doctor) ? "Dr. " : ""
                     }${invoice.doctor.name}`
                   : invoice.folder
                   ? "Registration"
@@ -312,9 +648,16 @@ function InvoiceCard({ invoice, onView, onViewReceipt }) {
         </div>
 
         <div className="flex items-center gap-3 flex-shrink-0">
-          <p className="text-xl font-black text-slate-900 dark:text-white">
-            {formatNGN(invoice.total_amount)}
-          </p>
+          <div className="text-right">
+            <p className="text-xl font-black text-slate-900 dark:text-white">
+              {formatNGN(isPartial ? balance : invoice.total_amount)}
+            </p>
+            {isPartial && (
+              <p className="text-[10px] text-blue-500 font-bold">
+                Balance of {formatNGN(invoice.total_amount)}
+              </p>
+            )}
+          </div>
           <div className="flex gap-2">
             <button
               onClick={onView}
@@ -352,6 +695,7 @@ function InvoiceView({ invoiceId, onBack, onPaid, paystackEnabled }) {
   const [payMethod, setPayMethod] = useState(null); // 'manual' | 'card' | null
   const [selectedMethod, setSelectedMethod] = useState("cash"); // cash | pos | transfer | other
   const [paymentNotes, setPaymentNotes] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
 
   const PAYMENT_METHODS = [
     { value: "cash", label: "Cash", icon: Banknote },
@@ -363,28 +707,53 @@ function InvoiceView({ invoiceId, onBack, onPaid, paystackEnabled }) {
   useEffect(() => {
     api
       .get(`/reception/bills/${invoiceId}`)
-      .then((res) => setInvoice(res.data))
+      .then((res) => {
+        setInvoice(res.data);
+        const balance =
+          Number(res.data.total_amount) - Number(res.data.amount_paid || 0);
+        setPaymentAmount(balance > 0 ? balance.toFixed(2) : "");
+      })
       .catch(() => toast.error("Failed to load invoice."))
       .finally(() => setLoading(false));
   }, [invoiceId]);
 
+  const balance = invoice
+    ? Number(invoice.total_amount) - Number(invoice.amount_paid || 0)
+    : 0;
+
   const handleRecordPayment = async () => {
+    const amount = parseFloat(paymentAmount);
+    if (!amount || amount <= 0) {
+      toast.error("Enter an amount to collect.");
+      return;
+    }
+    if (amount > balance + 0.01) {
+      toast.error(`Amount can't exceed the balance of ${formatNGN(balance)}.`);
+      return;
+    }
     setPaying(true);
     try {
       await api.post(`/reception/bills/${invoiceId}/cash-payment`, {
         payment_method: selectedMethod,
+        amount,
         notes: paymentNotes,
       });
-      toast.success("Payment recorded! Receipt generated.");
+      toast.success(
+        amount < balance - 0.01
+          ? `Partial payment of ${formatNGN(amount)} recorded.`
+          : "Payment recorded! Receipt generated."
+      );
       onPaid();
-    } catch {
-      toast.error("Failed to record payment.");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to record payment.");
     } finally {
       setPaying(false);
     }
   };
 
-  // Card payment via Paystack popup
+  // Card payment via Paystack popup — always charges the full outstanding
+  // balance (Paystack has no concept of a partial card payment; the backend
+  // already computes this same amount server-side when initializing).
   const handleCardPay = async () => {
     setPaying(true);
     try {
@@ -397,7 +766,7 @@ function InvoiceView({ invoiceId, onBack, onPaid, paystackEnabled }) {
 
       const handler = window.PaystackPop.setup({
         key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
-        amount: Math.round(invoice?.total_amount * 100),
+        amount: Math.round(balance * 100),
         currency: "NGN",
         ref: reference,
         accessCode: access_code,
@@ -505,20 +874,22 @@ function InvoiceView({ invoiceId, onBack, onPaid, paystackEnabled }) {
               value={
                 invoice.doctor
                   ? `${
-                      invoice.doctor.role?.toLowerCase() === "doctor"
-                        ? "Dr. "
-                        : ""
+                      isDoctorRecordAuthor(invoice.doctor) ? "Dr. " : ""
                     }${invoice.doctor.name}`
                   : invoice.folder
                   ? "New Patient Registration"
+                  : invoice.type === "reception_bill"
+                  ? "Front Desk"
                   : "—"
               }
             />
-            <DetailChip
-              icon={<User size={14} />}
-              label="Specialization"
-              value={invoice?.doctor?.specialization || "—"}
-            />
+            {invoice?.doctor?.specialization && (
+              <DetailChip
+                icon={<User size={14} />}
+                label="Specialization"
+                value={invoice.doctor.specialization}
+              />
+            )}
             {invoice?.appointment && (
               <DetailChip
                 icon={<Calendar size={14} />}
@@ -562,15 +933,34 @@ function InvoiceView({ invoiceId, onBack, onPaid, paystackEnabled }) {
                   ))}
                 </tbody>
                 <tfoot className="bg-slate-50 dark:bg-slate-900/50 border-t-2 border-slate-200 dark:border-slate-700">
+                  {invoice?.status === "partially_paid" && (
+                    <tr>
+                      <td
+                        colSpan={2}
+                        className="p-4 pb-1 font-bold text-slate-500 dark:text-slate-400 text-sm"
+                      >
+                        Paid so far
+                      </td>
+                      <td className="p-4 pb-1 text-right font-bold text-blue-600 dark:text-blue-400">
+                        {formatNGN(invoice.amount_paid)}
+                      </td>
+                    </tr>
+                  )}
                   <tr>
                     <td
                       colSpan={2}
                       className="p-4 font-black text-slate-900 dark:text-white uppercase text-sm"
                     >
-                      Total Due
+                      {invoice?.status === "partially_paid"
+                        ? "Balance Remaining"
+                        : "Total Due"}
                     </td>
                     <td className="p-4 text-right font-black text-xl text-teal-600 dark:text-teal-400">
-                      {formatNGN(invoice?.total_amount)}
+                      {formatNGN(
+                        invoice?.status === "partially_paid"
+                          ? balance
+                          : invoice?.total_amount
+                      )}
                     </td>
                   </tr>
                 </tfoot>
@@ -658,13 +1048,31 @@ function InvoiceView({ invoiceId, onBack, onPaid, paystackEnabled }) {
                     </button>
                   </div>
 
-                  <div className="bg-white dark:bg-slate-800 rounded-xl p-4 text-center border border-green-100 dark:border-green-500/20">
-                    <p className="text-xs text-slate-400 mb-1">
-                      Amount to collect
-                    </p>
-                    <p className="text-2xl font-black text-green-600 dark:text-green-400">
-                      {formatNGN(invoice?.total_amount)}
-                    </p>
+                  <div className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-green-100 dark:border-green-500/20">
+                    <label className="text-xs text-slate-400 mb-2 block text-center">
+                      Amount to collect — balance is {formatNGN(balance)}
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-green-600 dark:text-green-400 font-bold">
+                        ₦
+                      </span>
+                      <input
+                        type="number"
+                        min="0.01"
+                        max={balance}
+                        step="0.01"
+                        className="w-full text-center text-2xl font-black text-green-600 dark:text-green-400 bg-transparent outline-none pl-8 py-1"
+                        value={paymentAmount}
+                        onChange={(e) => setPaymentAmount(e.target.value)}
+                      />
+                    </div>
+                    {parseFloat(paymentAmount) > 0 &&
+                      parseFloat(paymentAmount) < balance - 0.01 && (
+                        <p className="text-xs text-blue-600 dark:text-blue-400 text-center mt-1 font-semibold">
+                          Partial payment — {formatNGN(balance - parseFloat(paymentAmount))}{" "}
+                          will remain owing.
+                        </p>
+                      )}
                   </div>
 
                   <div>
@@ -766,7 +1174,7 @@ function InvoiceView({ invoiceId, onBack, onPaid, paystackEnabled }) {
                     ) : (
                       <>
                         <CreditCard size={18} /> Open Paystack —{" "}
-                        {formatNGN(invoice?.total_amount)}
+                        {formatNGN(balance)}
                       </>
                     )}
                   </button>
@@ -797,32 +1205,134 @@ function ReceiptView({ receiptId, onBack }) {
       .finally(() => setLoading(false));
   }, [receiptId]);
 
+  // Builds a fully self-contained, inline-styled document rather than
+  // reusing the on-screen Tailwind markup — the print window never loads
+  // Tailwind, so copying that innerHTML across previously produced an
+  // unstyled "raw form" (this was the actual bug behind that complaint).
+  // Sized to a quarter of A4 (~A6) per the hospital's request, so it prints
+  // or saves-as-PDF standalone at that fixed size regardless of the app's
+  // own page size.
   const handlePrint = () => {
-    const content = printRef.current.innerHTML;
-    const win = window.open("", "_blank");
-    win.document.write(`
+    const invoice = receipt?.invoice;
+    const patientName =
+      invoice?.patient?.name ||
+      (invoice?.patient_file
+        ? `${invoice.patient_file.first_name} ${invoice.patient_file.last_name}`
+        : invoice?.folder?.folder_name || "Walk-in Patient");
+    const patientContact =
+      invoice?.patient?.email ||
+      invoice?.patient_file?.folder?.phone ||
+      invoice?.folder?.phone ||
+      "—";
+
+    const itemRows = (invoice?.items || [])
+      .map(
+        (item) => `
+          <tr>
+            <td>${escapeHtml(item.description)}</td>
+            <td class="amt">${escapeHtml(formatNGN(item.total_price))}</td>
+          </tr>`
+      )
+      .join("");
+
+    const html = `
       <!DOCTYPE html><html><head>
-      <title>Receipt ${receipt?.receipt_number}</title>
+      <meta charset="utf-8" />
+      <title>Receipt ${escapeHtml(receipt?.receipt_number || "")}</title>
       <style>
+        @page { size: 105mm 148mm; margin: 6mm; }
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'Segoe UI',Arial,sans-serif; color:#1e293b; padding:40px; font-size:13px; }
-        .header { display:flex; justify-content:space-between; border-bottom:3px solid #14b8a6; padding-bottom:16px; margin-bottom:20px; }
-        .brand { font-size:22px; font-weight:900; color:#0f766e; }
-        .success-box { background:#f0fdf4; border:2px solid #86efac; border-radius:12px; padding:16px; text-align:center; margin:20px 0; }
-        .success-amount { font-size:28px; font-weight:900; color:#15803d; }
-        .meta-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:16px 0; }
-        .meta-item { background:#f8fafc; border-radius:8px; padding:10px; }
-        .meta-label { font-size:9px; text-transform:uppercase; letter-spacing:1px; color:#94a3b8; font-weight:700; }
-        .meta-value { font-size:13px; font-weight:700; margin-top:2px; }
-        table { width:100%; border-collapse:collapse; margin:12px 0; }
-        th { background:#f8fafc; padding:10px; text-align:left; font-size:10px; text-transform:uppercase; color:#64748b; }
-        td { padding:10px; border-bottom:1px solid #e2e8f0; }
-        .total td { font-weight:900; font-size:15px; color:#0f766e; border:none; border-top:2px solid #e2e8f0; }
-        .footer { margin-top:24px; padding-top:12px; border-top:1px solid #e2e8f0; font-size:10px; color:#94a3b8; text-align:center; }
-        @media print { body { padding:20px; } }
+        body { font-family:'Segoe UI',Arial,sans-serif; color:#1e293b; font-size:9px; }
+        .sheet { border:2px solid #0f766e; border-radius:6px; padding:10px; position:relative; overflow:hidden; }
+        .sheet::before {
+          content:''; position:absolute; inset:0; pointer-events:none;
+          border:1px solid #99f6e4; border-radius:4px; margin:3px;
+        }
+        .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #14b8a6; padding-bottom:6px; margin-bottom:8px; }
+        .brand { font-size:14px; font-weight:900; color:#0f766e; letter-spacing:-0.3px; }
+        .brand-sub { font-size:7px; color:#64748b; margin-top:1px; }
+        .rc { font-size:6.5px; color:#94a3b8; margin-top:2px; }
+        .badge { background:#f0fdfa; border:1px solid #5eead4; color:#0f766e; font-size:6.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; padding:3px 6px; border-radius:999px; white-space:nowrap; }
+        .patient { background:#f8fafc; border-radius:6px; padding:6px 8px; margin-bottom:8px; }
+        .patient-name { font-weight:800; font-size:9.5px; }
+        .patient-contact { font-size:7.5px; color:#94a3b8; }
+        .amount-box { background:#f0fdf4; border:1.5px solid #86efac; border-radius:6px; padding:8px; text-align:center; margin-bottom:8px; }
+        .amount-label { font-size:6.5px; text-transform:uppercase; letter-spacing:0.8px; color:#15803d; font-weight:800; }
+        .amount-value { font-size:17px; font-weight:900; color:#15803d; }
+        .meta { display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:8px; font-size:7.5px; }
+        .meta-item { background:#f8fafc; border-radius:5px; padding:5px 6px; }
+        .meta-label { font-size:6px; text-transform:uppercase; letter-spacing:0.5px; color:#94a3b8; font-weight:700; }
+        .meta-value { font-weight:700; margin-top:1px; }
+        table { width:100%; border-collapse:collapse; margin-bottom:6px; font-size:7.5px; }
+        th { text-align:left; font-size:6px; text-transform:uppercase; letter-spacing:0.5px; color:#64748b; border-bottom:1px solid #cbd5e1; padding:3px 0; }
+        td { padding:3px 0; border-bottom:1px solid #e2e8f0; }
+        .amt { text-align:right; font-weight:700; }
+        .total-row td { font-weight:900; font-size:9px; color:#0f766e; border:none; border-top:2px solid #0f766e; padding-top:5px; }
+        .footer { margin-top:8px; padding-top:6px; border-top:1px dashed #cbd5e1; font-size:6px; color:#94a3b8; text-align:center; line-height:1.5; }
       </style>
-      </head><body>${content}</body></html>
-    `);
+      </head><body>
+        <div class="sheet">
+          <div class="header">
+            <div>
+              <div class="brand">${escapeHtml(COMPANY_NAME)}</div>
+              <div class="brand-sub">Hospital Management System</div>
+              <div class="rc">${escapeHtml(COMPANY_RC_NUMBER)}</div>
+            </div>
+            <span class="badge">Official Receipt</span>
+          </div>
+
+          <div class="patient">
+            <div class="patient-name">${escapeHtml(patientName)}</div>
+            <div class="patient-contact">${escapeHtml(patientContact)}</div>
+          </div>
+
+          <div class="amount-box">
+            <div class="amount-label">Payment Successful</div>
+            <div class="amount-value">${escapeHtml(formatNGN(receipt?.amount_paid))}</div>
+          </div>
+
+          <div class="meta">
+            <div class="meta-item">
+              <div class="meta-label">Receipt No.</div>
+              <div class="meta-value">${escapeHtml(receipt?.receipt_number || "—")}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Invoice No.</div>
+              <div class="meta-value">${escapeHtml(invoice?.invoice_number || "—")}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Payment Date</div>
+              <div class="meta-value">${escapeHtml(formatDate(receipt?.issued_at))}</div>
+            </div>
+            <div class="meta-item">
+              <div class="meta-label">Method</div>
+              <div class="meta-value">${escapeHtml((receipt?.payment_method || "—").toUpperCase())}</div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr><th>Description</th><th class="amt">Amount</th></tr>
+            </thead>
+            <tbody>${itemRows}</tbody>
+            <tfoot>
+              <tr class="total-row">
+                <td>Total Paid</td>
+                <td class="amt">${escapeHtml(formatNGN(receipt?.amount_paid))}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div class="footer">
+            This is an official receipt from ${escapeHtml(COMPANY_NAME)} HMS.<br />
+            ${escapeHtml(COMPANY_RC_NUMBER)} · Generated on ${escapeHtml(formatDate(new Date()))}
+          </div>
+        </div>
+      </body></html>
+    `;
+
+    const win = window.open("", "_blank");
+    win.document.write(html);
     win.document.close();
     win.focus();
     win.print();
@@ -862,6 +1372,9 @@ function ReceiptView({ receiptId, onBack }) {
               A4 Medical
             </h1>
             <p className="text-xs text-slate-400">Hospital Management System</p>
+            <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-0.5">
+              {COMPANY_RC_NUMBER}
+            </p>
           </div>
           <span className="bg-teal-50 dark:bg-teal-500/10 border border-teal-200 dark:border-teal-500/30 text-teal-700 dark:text-teal-400 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full">
             Official Receipt
@@ -971,10 +1484,10 @@ function ReceiptView({ receiptId, onBack }) {
 
           <div className="border-t border-slate-200 dark:border-slate-700 pt-4 text-center">
             <p className="text-xs text-slate-400">
-              This is an official receipt from A4 Medical Consortium HMS.
+              This is an official receipt from {COMPANY_NAME} HMS.
             </p>
             <p className="text-xs text-slate-300 dark:text-slate-600 mt-1">
-              Generated on {formatDate(new Date())}
+              {COMPANY_RC_NUMBER} · Generated on {formatDate(new Date())}
             </p>
           </div>
         </div>
@@ -987,6 +1500,8 @@ const StatusBadge = ({ status, large = false }) => {
   const styles = {
     unpaid:
       "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400 border-amber-200 dark:border-amber-500/30",
+    partially_paid:
+      "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400 border-blue-200 dark:border-blue-500/30",
     overdue:
       "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 border-red-200 dark:border-red-500/30",
     paid: "bg-teal-100 text-teal-700 dark:bg-teal-500/20 dark:text-teal-400 border-teal-200 dark:border-teal-500/30",
@@ -999,7 +1514,7 @@ const StatusBadge = ({ status, large = false }) => {
         styles[status] || styles.unpaid
       } ${large ? "text-xs" : "text-[10px]"}`}
     >
-      {status}
+      {status?.replace("_", " ")}
     </span>
   );
 };

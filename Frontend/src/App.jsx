@@ -16,6 +16,7 @@ import AdminSchedule from "./sections/Appointments";
 import BillsReceipts from "./sections/Billings";
 import Profile from "./sections/Profile";
 import MedicalRecords from "./sections/MedicalRecords";
+import Admissions from "./sections/Admissions";
 import Pharmacy from "./sections/Pharmacy";
 import Settings from "./sections/Settings";
 import Support from "./sections/Support";
@@ -134,6 +135,7 @@ export default function App() {
               }
             >
               <Route path="medical-records" element={<MedicalRecords />} />
+              <Route path="admissions" element={<Admissions />} />
             </Route>
 
             {/* Admin only */}
@@ -184,14 +186,11 @@ export default function App() {
               <Route path="Inventory" element={<Inventory />} />
             </Route>
 
-            {/* Pharmacy + Admin + Receptionist — shared sales desk
-                (see RoleHome.jsx: both land on sales-records by default) */}
+            {/* Pharmacy + Admin — receptionist no longer runs the sales
+                desk (moved to Pharmacy; reception defaults to Schedules,
+                see RoleHome.jsx) */}
             <Route
-              element={
-                <ProtectedRoute
-                  allowedRoles={["pharmacy", "admin", "receptionist"]}
-                />
-              }
+              element={<ProtectedRoute allowedRoles={["pharmacy", "admin"]} />}
             >
               <Route path="sales-records" element={<SalesRecords />} />
             </Route>

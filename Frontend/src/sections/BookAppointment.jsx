@@ -65,17 +65,25 @@ export default function BookAppointment() {
     if (
       !formData.doctor_id ||
       !formData.appointment_date ||
-      !formData.appointment_time ||
-      !formData.reason
+      !formData.appointment_time
     ) {
       toast.error("Please fill in all required fields.");
+      return;
+    }
+
+    // The reason pills and the free-text box are two ways of saying the same
+    // thing — either alone is enough, only both empty is a problem.
+    if (!formData.reason && !formData.additional_notes.trim()) {
+      toast.error(
+        "Please select a reason for your visit or describe it in the notes."
+      );
       return;
     }
 
     setSubmitting(true);
 
     try {
-      const response = await api.post("/appointments", formData);
+      await api.post("/appointments", formData);
 
       toast.success("Appointment booked successfully!");
       navigate("/dashboard/my-appointments");
@@ -151,7 +159,9 @@ export default function BookAppointment() {
                     Dr. {doc.name}
                   </p>
                   <p className="text-sm text-gray-500 capitalize">
-                    {doc.specialization}
+                    {doc.role === "admin"
+                      ? "Hospital Administrator"
+                      : doc.specialization}
                   </p>
                 </div>
                 {formData.doctor_id === doc.id && (

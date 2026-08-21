@@ -20,12 +20,26 @@ import {
   Wind,
   Droplets,
   User,
+  Link2,
+  CreditCard,
 } from "lucide-react";
 import api from "../services/api";
 import { toast } from "react-hot-toast";
+import { COMPANY_NAME, COMPANY_RC_NUMBER } from "../utils/companyInfo";
+
+const escapeHtml = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[c]);
 
 export default function MedicalReport() {
   const [requests, setRequests] = useState([]);
+  const [linkedFiles, setLinkedFiles] = useState([]);
+  const [loadingLinked, setLoadingLinked] = useState(true);
   const [loading, setLoading] = useState(true);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [viewingReport, setViewingReport] = useState(null); // holds full report data
@@ -41,8 +55,20 @@ export default function MedicalReport() {
     }
   };
 
+  const fetchLinkedFiles = async () => {
+    try {
+      const res = await api.get("/patient/linked-records");
+      setLinkedFiles(res.data || []);
+    } catch {
+      // Non-fatal — the claim card just shows its default "not linked" state.
+    } finally {
+      setLoadingLinked(false);
+    }
+  };
+
   useEffect(() => {
     fetchRequests();
+    fetchLinkedFiles();
   }, []);
 
   const handleViewReport = async (requestId) => {
@@ -91,6 +117,13 @@ export default function MedicalReport() {
           </button>
         )}
       </div>
+
+      {!loadingLinked && (
+        <ClaimRecordCard
+          linkedFiles={linkedFiles}
+          onLinked={fetchLinkedFiles}
+        />
+      )}
 
       {/* Pending request banner */}
       {pendingRequest && (
@@ -161,6 +194,227 @@ export default function MedicalReport() {
           setIsFormOpen(false);
         }}
       />
+    </div>
+  );
+}
+
+// ── LINK YOUR HOSPITAL RECORD ────────────────────────────────────────────────
+// A walk-in patient's hospital file (PatientFile) and their online login
+// (User) are unrelated identities until they explicitly link them here —
+// see RecordClaimController. This is also what makes the report above
+// actually contain something: without a linked file, "Request Medical
+// Report" only ever has online-issued prescriptions to draw on.
+function ClaimRecordCard({ linkedFiles, onLinked }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [step, setStep] = useState("lookup"); // 'lookup' | 'pick'
+  const [cardNumber, setCardNumber] = useState("");
+  const [phone, setPhone] = useState("");
+  const [folderName, setFolderName] = useState("");
+  const [files, setFiles] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  const reset = () => {
+    setStep("lookup");
+    setCardNumber("");
+    setPhone("");
+    setFolderName("");
+    setFiles([]);
+  };
+
+  const handleLookup = async (e) => {
+    e.preventDefault();
+    if (!cardNumber.trim() || !phone.trim()) {
+      return toast.error("Enter both the card number and phone number.");
+    }
+    setLoading(true);
+    try {
+      const res = await api.post("/patient/claim-record/lookup", {
+        card_number: cardNumber.trim(),
+        phone: phone.trim(),
+      });
+      setFolderName(res.data.folder_name);
+      setFiles(res.data.files || []);
+      setStep("pick");
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message ||
+          "No hospital record found matching that card number and phone."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePick = async (fileId) => {
+    setLoading(true);
+    try {
+      await api.post("/patient/claim-record/confirm", {
+        card_number: cardNumber.trim(),
+        phone: phone.trim(),
+        patient_file_id: fileId,
+      });
+      toast.success("Hospital record linked to your account.");
+      setIsOpen(false);
+      reset();
+      onLinked();
+    } catch (err) {
+      toast.error(
+        err.response?.data?.message || "Failed to link that record."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (linkedFiles.length > 0 && !isOpen) {
+    return (
+      <div className="flex items-center justify-between gap-4 bg-teal-50 dark:bg-teal-500/10 border border-teal-200 dark:border-teal-500/30 rounded-2xl p-5 mb-6">
+        <div className="flex items-start gap-3">
+          <Link2 size={18} className="text-teal-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold text-teal-700 dark:text-teal-400 text-sm">
+              Hospital record linked
+            </p>
+            <p className="text-teal-600 dark:text-teal-500 text-xs mt-0.5">
+              {linkedFiles.map((f) => `${f.first_name} ${f.last_name}`).join(", ")}{" "}
+              — visits and prescriptions from{" "}
+              {linkedFiles.length === 1 ? "this record" : "these records"} are
+              included in your medical report.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => setIsOpen(true)}
+          className="flex-shrink-0 text-xs font-bold text-teal-600 hover:underline cursor-pointer"
+        >
+          Link another
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-5 mb-6">
+      {!isOpen ? (
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <CreditCard
+              size={18}
+              className="text-slate-400 flex-shrink-0 mt-0.5"
+            />
+            <div>
+              <p className="font-bold text-slate-800 dark:text-white text-sm">
+                Link your hospital record
+              </p>
+              <p className="text-slate-500 text-xs mt-0.5">
+                If you've visited us in person before, link your hospital
+                card to see those visits and prescriptions in your report.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsOpen(true)}
+            className="flex-shrink-0 flex items-center gap-1.5 bg-teal-500 hover:bg-teal-600 text-white px-4 py-2 rounded-xl font-bold text-xs transition-all cursor-pointer"
+          >
+            <Link2 size={14} /> Link Record
+          </button>
+        </div>
+      ) : step === "lookup" ? (
+        <form onSubmit={handleLookup}>
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <p className="font-bold text-slate-800 dark:text-white text-sm">
+                Link your hospital record
+              </p>
+              <p className="text-slate-500 text-xs mt-0.5">
+                Enter the card number and phone number on your hospital card.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                reset();
+              }}
+              className="p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full cursor-pointer"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+            <input
+              type="text"
+              placeholder="Card number (e.g. A4C-P-2026-00001)"
+              className={inputClass}
+              value={cardNumber}
+              onChange={(e) => setCardNumber(e.target.value)}
+            />
+            <input
+              type="text"
+              placeholder="Phone number on file"
+              className={inputClass}
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3 bg-teal-500 hover:bg-teal-600 disabled:opacity-60 text-white font-bold rounded-xl text-sm transition-all cursor-pointer"
+          >
+            {loading ? "Searching..." : "Find My Record"}
+          </button>
+        </form>
+      ) : (
+        <div>
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <p className="font-bold text-slate-800 dark:text-white text-sm">
+                {folderName} — which of these is you?
+              </p>
+              <p className="text-slate-500 text-xs mt-0.5">
+                A family card can cover more than one person.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                reset();
+              }}
+              className="p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-full cursor-pointer"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="space-y-2">
+            {files.map((f) => (
+              <button
+                key={f.id}
+                disabled={loading || f.linked_to_other}
+                onClick={() => handlePick(f.id)}
+                className={`w-full flex items-center justify-between p-3 rounded-xl text-left text-sm font-bold transition-all ${
+                  f.linked_to_other
+                    ? "bg-slate-50 dark:bg-slate-900/40 text-slate-400 cursor-not-allowed"
+                    : "bg-slate-50 dark:bg-slate-900/40 hover:bg-teal-50 dark:hover:bg-teal-500/10 text-slate-800 dark:text-white cursor-pointer"
+                }`}
+              >
+                {f.name}
+                {f.linked_to_you && (
+                  <span className="text-[10px] text-teal-600 font-bold uppercase">
+                    Already yours
+                  </span>
+                )}
+                {f.linked_to_other && (
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">
+                    Linked to another account
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -304,7 +558,7 @@ function RequestForm({ isOpen, onClose, onSubmitted }) {
         onClick={onClose}
       />
       <div
-        className={`absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-800 p-8 transform transition-transform duration-300 border-l border-slate-200 dark:border-slate-700 overflow-y-auto ${
+        className={`absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-800 p-8 transform transition-transform duration-300 border-l border-slate-200 dark:border-slate-700 overflow-y-auto custom-scrollbar ${
           isOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >
@@ -397,48 +651,36 @@ function RequestForm({ isOpen, onClose, onSubmitted }) {
 function ReportView({ data, onBack }) {
   const printRef = useRef();
 
+  // The report body on screen is styled with Tailwind utility classes, not
+  // the hand-rolled .report-header/.visit-card/etc rule set this used to
+  // inject here — those class names don't exist in the captured innerHTML
+  // (see BillsandReceipts.jsx's ReceiptView for the same bug and a
+  // data-driven rewrite; this report is too structurally varied — vitals,
+  // allergy alerts, prescriptions, an arbitrary number of visits — for that
+  // approach to be worth it here). Instead, clone the app's own stylesheets
+  // into the print window so the real Tailwind classes actually apply, and
+  // force light mode so it never prints with a dark background regardless
+  // of the viewer's current theme.
   const handlePrint = () => {
     const printContent = printRef.current.innerHTML;
     const win = window.open("", "_blank");
+    const styleTags = Array.from(
+      document.querySelectorAll('style, link[rel="stylesheet"]')
+    )
+      .map((el) => el.outerHTML)
+      .join("\n");
+
     win.document.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Medical Report — ${data.patient.name}</title>
+          <meta charset="utf-8" />
+          <title>Medical Report — ${escapeHtml(data.patient.name)}</title>
+          ${styleTags}
           <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; padding: 40px; font-size: 13px; line-height: 1.6; }
-            .report-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #14b8a6; padding-bottom: 20px; margin-bottom: 24px; }
-            .hospital-name { font-size: 22px; font-weight: 800; color: #0f766e; letter-spacing: -0.5px; }
-            .hospital-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
-            .report-meta { text-align: right; font-size: 11px; color: #64748b; }
-            .report-meta strong { display: block; font-size: 13px; color: #1e293b; }
-            .patient-header { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-            .patient-name { font-size: 20px; font-weight: 800; color: #0f172a; grid-column: 1/-1; }
-            .metric { }
-            .metric-label { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; }
-            .metric-value { font-size: 13px; font-weight: 600; color: #1e293b; }
-            .alert-box { border-radius: 8px; padding: 12px 16px; margin-bottom: 10px; }
-            .alert-allergy { background: #fef2f2; border: 1px solid #fecaca; }
-            .alert-condition { background: #fffbeb; border: 1px solid #fde68a; }
-            .alert-label { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
-            .alert-allergy .alert-label { color: #dc2626; }
-            .alert-condition .alert-label { color: #d97706; }
-            .section-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; margin: 24px 0 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
-            .visit-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 12px; page-break-inside: avoid; }
-            .visit-date { font-size: 13px; font-weight: 700; color: #0f766e; margin-bottom: 8px; }
-            .visit-doctor { font-size: 11px; color: #64748b; margin-bottom: 10px; }
-            .complaint-box { background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; }
-            .complaint-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #0f766e; margin-bottom: 3px; }
-            .vitals-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
-            .vital { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; }
-            .vital-label { font-size: 9px; text-transform: uppercase; color: #94a3b8; font-weight: 700; }
-            .vital-value { font-size: 12px; font-weight: 600; }
-            .field-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: #94a3b8; margin-bottom: 2px; margin-top: 8px; }
-            .rx-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px; margin-bottom: 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; page-break-inside: avoid; }
-            .rx-name { font-size: 15px; font-weight: 800; color: #0f172a; grid-column: 1/-1; margin-bottom: 4px; }
-            .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; }
-            @media print { body { padding: 20px; } }
+            body { background: #fff; padding: 24px; }
+            @page { margin: 12mm; }
+            @media print { body { padding: 0; } }
           </style>
         </head>
         <body>${printContent}</body>
@@ -446,7 +688,11 @@ function ReportView({ data, onBack }) {
     `);
     win.document.close();
     win.focus();
-    win.print();
+    // Give the cloned stylesheets a beat to load before invoking print —
+    // document.write's synchronous parse doesn't wait on external <link>
+    // stylesheets, and printing before they load would reproduce the exact
+    // unstyled output this rewrite exists to fix.
+    setTimeout(() => win.print(), 300);
   };
 
   const { patient, records, prescriptions, request } = data;
@@ -480,6 +726,9 @@ function ReportView({ data, onBack }) {
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
               Hospital Management System
+            </p>
+            <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-0.5">
+              {COMPANY_RC_NUMBER}
             </p>
           </div>
           <div className="text-right">
@@ -765,7 +1014,10 @@ function ReportView({ data, onBack }) {
 
         {/* Footer */}
         <div className="border-t border-slate-200 dark:border-slate-700 pt-4 flex flex-col md:flex-row justify-between gap-2 text-xs text-slate-400">
-          <p>This is an official medical report generated by A4 Medical Consortium HMS.</p>
+          <p>
+            This is an official medical report generated by {COMPANY_NAME} HMS.{" "}
+            {COMPANY_RC_NUMBER}
+          </p>
           <p>
             Approved by Admin on{" "}
             {new Date(request.updated_at).toLocaleDateString("en-US", {

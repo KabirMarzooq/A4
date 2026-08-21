@@ -133,12 +133,13 @@ class BillingController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
 
-        // Summary stats
+        // Summary stats — outstanding is the remaining balance, not the
+        // full total, so a partially-paid invoice isn't double-counted.
         $totalOutstanding = $invoices
-            ->whereIn('status', ['unpaid', 'overdue'])
-            ->sum('total_amount');
+            ->whereIn('status', ['unpaid', 'overdue', 'partially_paid'])
+            ->sum(fn($i) => $i->outstandingBalance());
 
-        $unpaidCount = $invoices->whereIn('status', ['unpaid', 'overdue'])->count();
+        $unpaidCount = $invoices->whereIn('status', ['unpaid', 'overdue', 'partially_paid'])->count();
 
         return response()->json([
             'invoices'         => $invoices,
@@ -204,14 +205,51 @@ class BillingController extends Controller
             ->filter(fn($i) => $i->paid_at && $i->paid_at->isCurrentMonth())
             ->sum('total_amount');
 
-        $totalEarnings = $invoices->where('status', 'paid')->sum('total_amount');
-        $pendingAmount = $invoices->whereIn('status', ['unpaid', 'overdue'])->sum('total_amount');
+        $totalEarnings = $invoices->where('status', 'paid')->sum('total_amount')
+            + $invoices->where('status', 'partially_paid')->sum('amount_paid');
+        $pendingAmount = $invoices
+            ->whereIn('status', ['unpaid', 'overdue', 'partially_paid'])
+            ->sum(fn($i) => $i->outstandingBalance());
 
         return response()->json([
             'invoices'       => $invoices,
             'this_month'     => $thisMonth,
             'total_earnings' => $totalEarnings,
             'pending_amount' => $pendingAmount,
+        ]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ADMIN: Total revenue collected today across every treatment/invoice.
+    // Counted off actual Payments made today, not Invoice.status/paid_at —
+    // a same-day partial payment leaves the invoice 'partially_paid' with
+    // paid_at untouched (it isn't fully settled yet), but the cash still
+    // came in today and belongs in today's total.
+    // ─────────────────────────────────────────────────────────────────────────
+    public function adminRevenueToday()
+    {
+        $paymentsToday = Payment::where('status', 'successful')
+            ->whereDate('paid_at', today())
+            ->with('invoice:id,type')
+            ->get();
+
+        $totalToday    = $paymentsToday->sum('amount');
+        $paymentCount  = $paymentsToday->count();
+
+        $byType = $paymentsToday
+            ->groupBy(fn($p) => $p->invoice?->type ?? 'unknown')
+            ->map(fn($group, $type) => [
+                'type'  => $type,
+                'total' => $group->sum('amount'),
+                'count' => $group->count(),
+            ])
+            ->values();
+
+        return response()->json([
+            'date'           => today()->toDateString(),
+            'total_today'    => $totalToday,
+            'invoice_count'  => $paymentCount,
+            'by_type'        => $byType,
         ]);
     }
 

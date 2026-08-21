@@ -1,7 +1,17 @@
 import React, { useEffect, useState } from "react";
-import { Pill, Search, Plus, X, Calendar, User, Trash2 } from "lucide-react";
+import {
+  Pill,
+  Search,
+  Plus,
+  X,
+  Calendar,
+  User,
+  Trash2,
+  Download,
+} from "lucide-react";
 import api from "../services/api";
 import { toast } from "react-hot-toast";
+import { printPrescription } from "../utils/printPrescription";
 
 const inputClass =
   "w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 outline-none focus:ring-2 focus:ring-teal-500 dark:text-white text-sm";
@@ -41,24 +51,23 @@ export default function Prescriptions() {
         api.get("/doctor/prescriptions"),
         api.get("/doctor/patients"),
         api.get("/pharmacy/drugs"),
-        api.get("/folders"),
+        // with_files=1 returns folders AND their files in one response —
+        // this used to be a follow-up GET /folders/{id} per folder, which
+        // rate-limited itself into a wall of 429s.
+        api.get("/folders", { params: { with_files: 1 } }),
       ]);
       setPrescriptions(prescRes.data);
       setPatients(patientsRes.data);
       setDrugs(drugsRes.data?.drugs || []);
 
-      const allFiles = [];
-      for (const folder of filesRes.data || []) {
-        const folderRes = await api.get(`/folders/${folder.id}`);
-        folderRes.data.files?.forEach((file) => {
-          allFiles.push({
-            ...file,
-            folder_name: folder.folder_name,
-            phone: folder.phone,
-            display: `${file.first_name} ${file.last_name} — ${folder.folder_name}`,
-          });
-        });
-      }
+      const allFiles = (filesRes.data || []).flatMap((folder) =>
+        (folder.files || []).map((file) => ({
+          ...file,
+          folder_name: folder.folder_name,
+          phone: folder.phone,
+          display: `${file.first_name} ${file.last_name} — ${folder.folder_name}`,
+        }))
+      );
       setPatientFiles(allFiles);
     } catch {
       toast.error("Failed to load records.");
@@ -200,9 +209,18 @@ export default function Prescriptions() {
               <div className="w-10 h-10 bg-teal-500/10 rounded-xl flex items-center justify-center text-teal-600">
                 <Pill size={20} />
               </div>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                <Calendar size={12} /> {p.created_at?.split("T")[0]}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1">
+                  <Calendar size={12} /> {p.created_at?.split("T")[0]}
+                </span>
+                <button
+                  onClick={() => printPrescription(p)}
+                  className="p-1.5 text-slate-400 hover:text-teal-500 hover:bg-teal-500/10 rounded-lg transition-all cursor-pointer"
+                  title="Print / Download"
+                >
+                  <Download size={14} />
+                </button>
+              </div>
             </div>
 
             <h3 className="font-bold text-slate-900 dark:text-white text-lg mb-1">
@@ -281,7 +299,7 @@ export default function Prescriptions() {
           onClick={() => setIsSidebarOpen(false)}
         />
         <div
-          className={`absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-800 p-8 transform transition-transform duration-300 border-l border-slate-200 dark:border-slate-700 overflow-y-auto custom-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] ${
+          className={`absolute right-0 top-0 h-full w-full max-w-md bg-white dark:bg-slate-800 p-8 transform transition-transform duration-300 border-l border-slate-200 dark:border-slate-700 overflow-y-auto custom-scrollbar ${
             isSidebarOpen ? "translate-x-0" : "translate-x-full"
           }`}
         >
@@ -299,7 +317,7 @@ export default function Prescriptions() {
 
           <form
             onSubmit={handleCreate}
-            className="space-y-5 overflow-y-auto custom-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+            className="space-y-5 overflow-y-auto custom-scrollbar"
           >
             {/* Patient */}
             <div>
@@ -351,7 +369,7 @@ export default function Prescriptions() {
                     {/* Drug selector */}
                     <div className="flex gap-2 items-center">
                       <select
-                        className={`${inputClass} flex-1 overflow-y-auto custom-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]`}
+                        className={`${inputClass} flex-1`}
                         value={line.drug_id}
                         onChange={(e) =>
                           setDrugLine(index, "drug_id", e.target.value)

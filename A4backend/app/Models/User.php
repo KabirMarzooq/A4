@@ -67,8 +67,11 @@ class User extends Authenticatable implements JWTSubject
         ];
     }
 
-    public function patientProfile()
+    // Desk-created patient files this account has claimed as its own — see
+    // RecordClaimController. A patient's online login and their walk-in
+    // hospital record are otherwise unrelated identities.
+    public function linkedPatientFiles()
     {
-        return $this->hasOne(PatientProfile::class, 'user_id');
+        return $this->hasMany(PatientFile::class, 'linked_user_id');
     }
 }

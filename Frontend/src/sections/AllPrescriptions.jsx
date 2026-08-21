@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Pill, Search, User, Calendar, Stethoscope } from "lucide-react";
+import { Pill, Search, User, Calendar, Stethoscope, Download } from "lucide-react";
 import api from "../services/api";
 import { toast } from "react-hot-toast";
+import { printPrescription } from "../utils/printPrescription";
 
 export default function AllPrescriptions() {
   const [prescriptions, setPrescriptions] = useState([]);
@@ -79,8 +80,17 @@ export default function AllPrescriptions() {
               key={p.id}
               className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 hover:shadow-xl transition-all group"
             >
-              <div className="w-12 h-12 bg-teal-500/10 rounded-2xl flex items-center justify-center text-teal-600 group-hover:scale-110 transition-transform mb-4">
-                <Pill size={24} />
+              <div className="flex justify-between items-start mb-4">
+                <div className="w-12 h-12 bg-teal-500/10 rounded-2xl flex items-center justify-center text-teal-600 group-hover:scale-110 transition-transform">
+                  <Pill size={24} />
+                </div>
+                <button
+                  onClick={() => printPrescription(p)}
+                  className="p-2 text-slate-400 hover:text-teal-500 hover:bg-teal-500/10 rounded-xl transition-all cursor-pointer"
+                  title="Print / Download"
+                >
+                  <Download size={18} />
+                </button>
               </div>
 
               <h3 className="font-bold text-slate-900 dark:text-white text-xl mb-3">

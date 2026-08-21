@@ -163,7 +163,7 @@ function SignUp() {
           </div>
         </div>
 
-        <div className="p-8 sm:p-10 max-h-[90vh] overflow-y-auto">
+        <div className="p-8 sm:p-10 max-h-[90vh] overflow-y-auto custom-scrollbar">
           <Link to="/" className="flex items-center mb-6">
             <img src={logoFull} alt="A4 Medical Consortium" className="h-12 w-auto" />
           </Link>

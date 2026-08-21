@@ -11,7 +11,7 @@ export default function RoleHome() {
     patient: "/dashboard/my-appointments",
     doctor: "/dashboard/overview",
     admin: "/dashboard/sales-records",
-    receptionist: "/dashboard/sales-records",
+    receptionist: "/dashboard/appointments",
     pharmacy: "/dashboard/sales-records",
     lab: "/dashboard/lab",
   };

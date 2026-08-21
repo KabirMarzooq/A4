@@ -47,6 +47,40 @@ class AdmissionController extends Controller
     }
 
     /**
+     * Hospital-wide admissions list — the ward board.
+     *
+     * Admissions previously had no home of their own: you could only admit or
+     * discharge from inside one patient's file, so "who is currently on the
+     * ward" was unanswerable without opening records one by one.
+     *
+     * ?status=admitted|discharged filters; default returns current stays
+     * first, then recent discharges.
+     */
+    public function index(Request $request)
+    {
+        $status = $request->query('status');
+        $search = $request->query('search');
+
+        $admissions = Admission::with([
+            'admittingDoctor:id,name',
+            'patientFile:id,patient_folder_id,first_name,last_name',
+            'patientFile.folder:id,folder_name,phone',
+        ])
+            ->when($status, fn($q) => $q->where('status', $status))
+            ->when($search, fn($q) => $q->whereHas(
+                'patientFile',
+                fn($f) => $f->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%")
+            ))
+            // Current stays float to the top regardless of date.
+            ->orderByRaw("CASE WHEN status = 'admitted' THEN 0 ELSE 1 END")
+            ->orderBy('admission_date', 'desc')
+            ->paginate(20);
+
+        return response()->json($admissions);
+    }
+
+    /**
      * This patient's full admission history (current + past stays).
      */
     public function indexForFile($fileId)

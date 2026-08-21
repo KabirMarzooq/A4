@@ -21,8 +21,12 @@ export function useNotifications(userRole) {
         return () => clearInterval(interval);
     }, [userRole]);
 
-    const clearNotification = (key) =>
+    const clearNotification = (key) => {
         setNotifications((prev) => ({ ...prev, [key]: false }));
+        // Persist so the next 30s poll doesn't re-light a dot the user just
+        // acknowledged — previously this was purely cosmetic client state.
+        api.post("/notifications/seen", { section_key: key }).catch(() => {});
+    };
 
     return { notifications, clearNotification };
 }

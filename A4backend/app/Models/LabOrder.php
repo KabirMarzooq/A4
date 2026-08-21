@@ -8,6 +8,9 @@ class LabOrder extends Model
 {
     protected $fillable = [
         'patient_file_id',
+        'patient_name',
+        'patient_email',
+        'patient_phone',
         'visit_record_id',
         'lab_test_id',
         'test_name',

@@ -17,6 +17,7 @@ class Invoice extends Model
         'subtotal',
         'service_charge',
         'total_amount',
+        'amount_paid',
         'currency',
         'status',
         'due_date',
@@ -30,6 +31,7 @@ class Invoice extends Model
         'subtotal'        => 'decimal:2',
         'service_charge'  => 'decimal:2',
         'total_amount'    => 'decimal:2',
+        'amount_paid'     => 'decimal:2',
     ];
 
     public function patient()
@@ -52,14 +54,47 @@ class Invoice extends Model
         return $this->hasMany(InvoiceItem::class);
     }
 
-    public function payment()
+    /**
+     * Every successful payment against this invoice — a partially-paid
+     * invoice can have more than one. Kept alongside payment() below rather
+     * than replacing it, since most of the codebase only ever needed "the"
+     * payment and still does for a fully-paid invoice.
+     */
+    public function payments()
     {
-        return $this->hasOne(Payment::class);
+        return $this->hasMany(Payment::class)->where('status', 'successful');
     }
 
+    /**
+     * The most recent payment — existing single-payment call sites
+     * (receipts, patient billing view) keep working unchanged.
+     */
+    public function payment()
+    {
+        return $this->hasOne(Payment::class)->latestOfMany();
+    }
+
+    /**
+     * Every receipt issued against this invoice — one per payment, so a
+     * partially-paid invoice can have several.
+     */
+    public function receipts()
+    {
+        return $this->hasMany(Receipt::class);
+    }
+
+    /**
+     * The most recent receipt — existing single-receipt call sites keep
+     * working unchanged.
+     */
     public function receipt()
     {
-        return $this->hasOne(Receipt::class);
+        return $this->hasOne(Receipt::class)->latestOfMany();
+    }
+
+    public function outstandingBalance(): float
+    {
+        return round((float) $this->total_amount - (float) $this->amount_paid, 2);
     }
 
     public static function generateInvoiceNumber(): string

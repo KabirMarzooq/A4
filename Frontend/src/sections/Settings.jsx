@@ -8,11 +8,14 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { useTheme } from "../layouts/ThemeContext";
-import api from "../services/api"; 
+import api from "../services/api";
 import toast from "react-hot-toast";
+import { isActingAsDoctor, getStoredActiveRole } from "../utils/roleDisplay";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState("overview");
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate(); 
 
@@ -116,23 +119,9 @@ export default function Settings() {
     }
   };
 
-  // Delete user Account Handler
+  // Delete user Account Handler. The "type DELETE" gate lives in the
+  // ConfirmDialog (requireTypedConfirmation) rather than a native prompt().
   const handleDeleteAccount = async () => {
-    const confirmed = window.confirm(
-      "⚠️ ARE YOU ABSOLUTELY SURE?\n\nThis action is PERMANENT and IRREVERSIBLE.\n\n✓ All your appointments will be deleted\n✓ All your patient/doctor records will be removed\n✓ You will be logged out immediately\n\nType 'DELETE' in the next prompt to confirm."
-    );
-
-    if (!confirmed) return;
-
-    const finalConfirmation = prompt(
-      "Type 'DELETE' (in capital letters) to permanently delete your account:"
-    );
-
-    if (finalConfirmation !== "DELETE") {
-      toast.error("Account deletion cancelled");
-      return;
-    }
-
     try {
       const response = await api.delete("/user/delete-account");
       toast.success(response.data.message || "Account deleted successfully");
@@ -148,6 +137,7 @@ export default function Settings() {
         err.response?.data?.message ||
         "Failed to delete account. Please contact support.";
       toast.error(errorMsg);
+      throw err; // keeps the confirm dialog open on failure
     }
   };
 
@@ -242,7 +232,10 @@ export default function Settings() {
                         Full Name
                       </p>
                       <p className="font-semibold text-slate-900 dark:text-white">
-                        {doctor.role?.toLowerCase() === "doctor" && "Dr. "}
+                        {isActingAsDoctor(
+                          { role: doctor.role },
+                          getStoredActiveRole()
+                        ) && "Dr. "}
                         {doctor.firstName || "-"} {doctor.lastName || "-"}
                       </p>
                     </div>
@@ -402,7 +395,7 @@ export default function Settings() {
                         from our servers immediately.
                       </p>
                       <button
-                        onClick={handleDeleteAccount}
+                        onClick={() => setConfirmDeleteOpen(true)}
                         type="button"
                         className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-red-500/20 cursor-pointer"
                       >
@@ -509,6 +502,19 @@ export default function Settings() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={confirmDeleteOpen}
+        onClose={() => setConfirmDeleteOpen(false)}
+        onConfirm={handleDeleteAccount}
+        title="Permanently delete your account?"
+        message={
+          "This is permanent and cannot be undone.\n\n• Your appointments will be deleted\n• Your records will be removed\n• You will be logged out immediately"
+        }
+        confirmLabel="Delete My Account"
+        requireTypedConfirmation="DELETE"
+        danger
+      />
     </div>
   );
 }

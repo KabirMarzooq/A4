@@ -112,7 +112,6 @@ class AuthController extends Controller
         $user->update([
             'last_login_at' => now()
         ]);
-        $user->save();
 
         SystemLog::log(
             'auth.login',
